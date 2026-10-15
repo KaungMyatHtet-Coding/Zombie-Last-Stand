@@ -1,3 +1,4 @@
+import {mapObstaclesNear,parkBlend,separateWrecks,wreckSteering,type Wreck} from './map-ground';
 import {assistedAim,escapeDirection,routedSpawn,buildSynergies,COMBAT_CACHE_KILLS} from './combat-feel';
 import {HERO_IDENTITIES,encounterRhythm,weaponMilestone} from './run-design';
 import {CARD_EVOLUTIONS} from './card-evolutions';
@@ -94,8 +95,21 @@ export class ArenaScene extends Phaser.Scene {
     attackSequence=0;
     pendingStrikes:{delay:number;weapon:WeaponId;damage:number;range:number;arc:number;echo:boolean}[]=[];
     touch?: TouchState;
-    get attacking(){return !!this.touch?.enabled || this.input.activePointer.isDown;}
+    get attacking(){return true;}
     floor!: Phaser.GameObjects.Graphics;
+    groundTiles:Phaser.GameObjects.Image[]=[];
+    parkTiles:Phaser.GameObjects.Image[]=[];
+    wreckImages:Phaser.GameObjects.Image[]=[];
+    mapCars:Wreck[]=[];
+    preload(){this.load.image('park-ground','/assets/maps/park-cartoon.png');this.load.image('city-asphalt','/assets/maps/city-asphalt-cartoon.png');this.load.image('city-wreck','/assets/maps/wreck-sedan-cartoon.png');}
+    moveOnGround(x:number,y:number,dx:number,dy:number,r:number){
+        if(this.stats.wave>10||!this.mapCars.length)return {x:x+dx,y:y+dy};
+        // Substeps prevent dash and knockback from crossing a thin chassis.
+        const steps=Math.max(1,Math.ceil(Math.hypot(dx,dy)/12));
+        for(let i=0;i<steps;i++){const p=separateWrecks(x+dx/steps,y+dy/steps,r,this.mapCars);x=p.x;y=p.y;}
+        return {x,y};
+    }
+
     keys!: Record<string, Phaser.Input.Keyboard.Key>;
     audio: AudioManager;
     save: Save;
@@ -255,7 +269,8 @@ export class ArenaScene extends Phaser.Scene {
     grid = new Map<string, Enemy[]>();
     dashHits = new Set<Enemy>();
     constructor(save: Save, audio: AudioManager, choice: (wave: boolean) => void, end: () => void, pause: () => void, options?:RunOptions) { super('arena'); this.save = save; this.audio = audio; this.hero = save.hero; this.weapon = save.weapon; this.onChoice = choice; this.onEnd = end; this.onPause = pause; if(options){this.options=options;this.hero=options.hero||save.hero;this.weapon=options.weapon||save.weapon;} if(this.options.seed!==undefined){this.random=seededRandom(this.options.seed);this.cardRandom=seededRandom(this.options.seed^0x85ebca6b);}if(!techniqueUnlocked(save.mastery[this.hero]?.kills||0,this.options.technique))this.options.technique='standard'; }
-    create() { this.floor = this.add.graphics(); this.gfx = this.add.graphics();this.warningGfx=this.add.graphics().setDepth(6); this.drawFloor(); this.visuals = new ArenaVisuals(this); this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,ESC,M,ONE,TWO,THREE') as typeof this.keys; this.input.keyboard!.on('keydown-ESC', () => this.onPause()); this.input.keyboard!.on('keydown-M', () => { this.save.settings.sound = !this.save.settings.sound; this.audio.sound = this.save.settings.sound; }); this.input.keyboard!.addCapture(['W', 'A', 'S', 'D', 'UP', 'DOWN', 'LEFT', 'RIGHT', 'SPACE']); const h = HEROES[this.hero]; this.maxHp = h.hp * (1 + this.meta('health') * .05); if(this.options.build==='guard')this.maxHp*=1.15;if(this.options.mode!=='daily'&&this.masteryKills>=100)this.maxHp*=1.05;this.hp = this.maxHp; this.rerolls = 1 + this.meta('reroll'); this.ammo=this.maxAmmo;this.cameras.main.setZoom(1.05); this.startWave(); }
+    create() { const park=this.textures.get('park-ground'),pw=Math.floor(park.getSourceImage().width/5),ph=Math.floor(park.getSourceImage().height/5);for(let y=0;y<5;y++)for(let x=0;x<5;x++)park.add(`${x}-${y}`,0,x*pw,y*ph,pw,ph); this.textures.get('city-wreck').add('chassis',0,150,18,810,1395); this.floor = this.add.graphics().setDepth(-4); this.gfx = this.add.graphics();this.warningGfx=this.add.graphics().setDepth(6); this.drawFloor(); this.visuals = new ArenaVisuals(this); this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,ESC,M,ONE,TWO,THREE') as typeof this.keys; this.input.keyboard!.on('keydown-ESC', () => this.onPause()); this.input.keyboard!.on('keydown-M', () => { this.save.settings.sound = !this.save.settings.sound; this.audio.sound = this.save.settings.sound; }); this.input.keyboard!.addCapture(['W', 'A', 'S', 'D', 'UP', 'DOWN', 'LEFT', 'RIGHT', 'SPACE']); const h = HEROES[this.hero]; this.maxHp = h.hp * (1 + this.meta('health') * .05); if(this.options.build==='guard')this.maxHp*=1.15;if(this.options.mode!=='daily'&&this.masteryKills>=100)this.maxHp*=1.05;this.hp = this.maxHp; this.rerolls = 1 + this.meta('reroll'); this.ammo=this.maxAmmo;this.applyMapView(); this.startWave(); }
+    applyMapView(){this.cameras.main.setZoom(1.05/(this.save.settings.mapView||1));this.cameras.main.centerOn(this.x,this.y);}
     floorTheme = 0;
     floorLabels: Phaser.GameObjects.Text[] = [];
     drawFloor() {
@@ -263,23 +278,54 @@ export class ArenaScene extends Phaser.Scene {
         this.floorTheme=this.stats.wave>10?1:0;
     }
     drawWorld(){
-        const g=this.floor,ash=this.stats.wave>10,view=this.cameras.main.worldView;
-        g.clear();g.fillStyle(ash?0x574b36:0x152130);g.fillRect(view.x-200,view.y-200,view.width+400,view.height+400);
-        const size=240,minX=Math.floor((view.x-200)/size),maxX=Math.ceil((view.right+200)/size),minY=Math.floor((view.y-200)/size),maxY=Math.ceil((view.bottom+200)/size);
-        for(let row=minY;row<=maxY;row++)for(let col=minX;col<=maxX;col++){
-            const x=col*size,y=row*size,seed=Math.abs((col*73856093)^(row*19349663));
-            g.lineStyle(1,ash?0x766347:0x273546,.3);if(!ash)g.strokeRect(x,y,size,size);
-            if(ash){g.lineStyle(2,0x9a8058,.28);for(let i=0;i<4;i++){g.beginPath();g.arc(x+120,y+260+i*17,150+i*12,3.7,5.4);g.strokePath();}}
-            g.lineStyle(2,ash?0x89724e:0x394b59,.4);g.lineBetween(x+31,y+45,x+65,y+70);g.lineBetween(x+65,y+70,x+53,y+100);
-            if(!ash&&row%3===0){g.fillStyle(ash?0x9e855a:0x69766b,.35);g.fillRect(x+30,y+114,80,5);g.fillRect(x+150,y+114,60,5);}
-            const px=x+55+seed%130,py=y+40+(seed>>>6)%140;
-            if(seed%4===0){g.fillStyle(ash?0x443a2b:0x0e1b2b,.6);g.fillEllipse(px,py,65,24);g.lineStyle(1,ash?0x897850:0x4a6372,.4);g.lineBetween(px-18,py-5,px+16,py-5);}
-            if(seed%4===1){g.lineStyle(2,ash?0x6f5b39:0x43634f,.6);for(let i=0;i<5;i++)g.lineBetween(px+i*6,py+10,px+i*6-3,py-6-i%3*3);}
-            if(seed%4===2){g.fillStyle(ash?0x9b8257:0x4b5b63,.6);for(let i=0;i<4;i++)g.fillRect(px+i*11,py+(i%2)*9,6,4);}
-            if(seed%4===3){g.lineStyle(3,ash?0x3e3527:0x091421,.4);g.lineBetween(px-35,py-25,px+40,py+20);g.lineBetween(px-35,py-14,px+40,py+31);}
+        const g=this.floor,robot=this.stats.wave>10,view=this.cameras.main.worldView;
+        g.clear();
+        let tileIndex=0;
+        if(!robot)for(let row=Math.floor(view.y/640)-1;row<=Math.ceil(view.bottom/640)+1;row++)for(let col=Math.floor(view.x/640)-1;col<=Math.ceil(view.right/640)+1;col++){
+            let tile=this.groundTiles[tileIndex];if(!tile){tile=this.add.image(0,0,'city-asphalt').setOrigin(0).setDepth(-5);this.groundTiles.push(tile);}
+            tile.setVisible(true).setPosition(col*640,row*640).setDisplaySize(641,641).setFlip(col%2!==0,row%2!==0);tileIndex++;
         }
-        if(ash){g.fillStyle(0xb39767,.035);g.fillRect(view.x,view.y,view.width,view.height);g.lineStyle(1,0xc3ad80,.18);for(let i=0;i<65;i++){const px=view.x+((i*97+this.elapsed*160)%(view.width+80))-40,py=view.y+((i*73+this.elapsed*24)%view.height);g.lineBetween(px,py,px+22,py+5);}}
+        for(let i=tileIndex;i<this.groundTiles.length;i++)this.groundTiles[i].setVisible(false);
+        let parkIndex=0;
+        if(!robot)for(let row=Math.floor(view.y/128)-1;row<=Math.ceil(view.bottom/128)+1;row++)for(let col=Math.floor(view.x/128)-1;col<=Math.ceil(view.right/128)+1;col++){
+            const alpha=parkBlend(col*128+64,row*128+64);if(alpha===0)continue;
+            let tile=this.parkTiles[parkIndex];if(!tile){tile=this.add.image(0,0,'park-ground').setOrigin(0).setDepth(-4.5);this.parkTiles.push(tile);}
+            const flipX=Math.floor(col/5)%2!==0,flipY=Math.floor(row/5)%2!==0,cx=((col%5)+5)%5,cy=((row%5)+5)%5,fx=flipX?4-cx:cx,fy=flipY?4-cy:cy;
+            tile.setVisible(true).setTexture('park-ground',`${fx}-${fy}`).setPosition(col*128,row*128).setDisplaySize(129,129).setFlip(flipX,flipY).setAlpha(alpha);parkIndex++;
+        }
+        for(let i=parkIndex;i<this.parkTiles.length;i++)this.parkTiles[i].setVisible(false);
+        this.mapCars=robot?[]:mapObstaclesNear(this.x,this.y,Math.max(view.width,view.height)+200);
+        const size=robot?192:640;
+        if(robot){g.fillStyle(0x202b35);g.fillRect(view.x-100,view.y-100,view.width+200,view.height+200);}
+        for(let row=Math.floor(view.y/size)-1;row<=Math.ceil(view.bottom/size)+1;row++)for(let col=Math.floor(view.x/size)-1;col<=Math.ceil(view.right/size)+1;col++){
+            const x=col*size,y=row*size;
+            if(robot){g.fillStyle((row+col)%2?0x26333d:0x293640);g.fillRoundedRect(x+3,y+3,size-6,size-6,5);g.lineStyle(2,0x0d1821,.8);g.strokeRoundedRect(x+3,y+3,size-6,size-6,5);g.fillStyle(0x52616b,.65);for(const xx of [12,size-12])for(const yy of [12,size-12])g.fillCircle(x+xx,y+yy,2);if(row%3===0){g.fillStyle(0x56a7ae,.4);g.fillRect(x+32,y+8,80,3);}if(col%4===0&&row%3===1){g.fillStyle(0xb39c5e,.35);for(let i=0;i<4;i++)g.fillRect(x+24+i*15,y+70,7,36);}}
+            else{
+                const city=1-parkBlend(x+320,y+320);
+                // Road details fade geographically as concrete gives way to grass.
+                g.fillStyle(0xc3bda0,.24*city);for(let i=0;i<4;i++)g.fillRect(x+75+i*140,y+310,65,4);
+                g.fillStyle(0x79827b,.14*city);g.fillRoundedRect(x+380,y+75,105,70,10);
+                g.fillStyle(0x161f25,.7*city);g.fillRoundedRect(x+55,y+64,38,22,3);g.lineStyle(2,0x525c5b,.65*city);for(let i=0;i<5;i++)g.lineBetween(x+60+i*6,y+68,x+60+i*6,y+82);
+            }
+        }
+        let carIndex=0;
+        this.mapCars.forEach(c=>{
+            if(c.kind){
+                g.fillStyle(0x101c20,.32);g.fillEllipse(c.x+3,c.y+8,c.halfW*2+10,c.halfH*2+8);
+                g.lineStyle(3,0x17252a,1);
+                if(c.kind==='log'){g.fillStyle(0x655342);g.fillRoundedRect(c.x-42,c.y-14,84,28,9);g.strokeRoundedRect(c.x-42,c.y-14,84,28,9);g.lineStyle(2,0x423e35);g.lineBetween(c.x-26,c.y-5,c.x+27,c.y-5);g.lineBetween(c.x-20,c.y+5,c.x+22,c.y+5);g.fillStyle(0x879063);g.fillRoundedRect(c.x-18,c.y-13,31,7,3);}
+                else{g.fillStyle(0x645342);g.fillRoundedRect(c.x-20,c.y-20,40,40,10);g.strokeRoundedRect(c.x-20,c.y-20,40,40,10);g.fillStyle(0x968568);g.fillEllipse(c.x,c.y-5,31,22);g.lineStyle(2,0x655845);g.strokeEllipse(c.x,c.y-5,19,12);}
+                return;
+            }
+            const i=carIndex++;
+            let image=this.wreckImages[i];if(!image){image=this.add.image(c.x,c.y,'city-wreck','chassis').setDepth(-1);this.wreckImages.push(image);}
+            image.setVisible(true).setPosition(c.x,c.y).setDisplaySize(70,142).setRotation(c.horizontal?Math.PI/2:0).setTint([0xffffff,0xc5bb9e,0xa8b9c8][c.variant]);
+            g.fillStyle(0x071016,.35);g.fillRoundedRect(c.x-c.halfW-3,c.y-c.halfH+4,c.halfW*2+6,c.halfH*2+4,10);
+            g.lineStyle(2,0x526348,.8);for(let j=0;j<5;j++){const xx=c.x-c.halfW-5+j*4,yy=c.y+c.halfH;g.lineBetween(xx,yy,xx-3,yy-8-j%2*4);}
+        });
+        for(let i=carIndex;i<this.wreckImages.length;i++)this.wreckImages[i].setVisible(false);
     }
+
     u(id: string) { return this.levels[id] || 0; }
     get count() {
         let n = 0;
@@ -352,8 +398,7 @@ export class ArenaScene extends Phaser.Scene {
         e.flash = .12;
         const heavy=!bullet&&['nodachi','hammer','shield','spiked'].includes(this.weapon);e.stagger=Math.max(e.stagger||0,(heavy?.22:bullet?.035:.08)*(['boss','shooterBoss','commander'].includes(e.type)?.25:1));
         const a = Math.atan2(e.y - this.y, e.x - this.x);
-        e.x += Math.cos(a) * knock * .65;
-        e.y += Math.sin(a) * knock * .65;
+        {const p=this.moveOnGround(e.x,e.y,Math.cos(a)*knock*.65,Math.sin(a)*knock*.65,e.r);e.x=p.x;e.y=p.y;}
         if (this.u('bleed'))
             e.bleed = 3;
         this.number(e.x, e.y, d, crit);
@@ -645,7 +690,7 @@ export class ArenaScene extends Phaser.Scene {
         if (this.countdown > 0) {
             this.countdown -= dt;
             let dx=this.touch?.enabled?this.touch.x:Number(this.keys.D.isDown||this.keys.RIGHT.isDown)-Number(this.keys.A.isDown||this.keys.LEFT.isDown),dy=this.touch?.enabled?this.touch.y:Number(this.keys.S.isDown||this.keys.DOWN.isDown)-Number(this.keys.W.isDown||this.keys.UP.isDown);
-            const length=Math.hypot(dx,dy);if(length>1){dx/=length;dy/=length;}if(length>0){this.angle=Math.atan2(dy,dx);this.x+=dx*HEROES[this.hero].speed*dt;this.y+=dy*HEROES[this.hero].speed*dt;}
+            const length=Math.hypot(dx,dy);if(length>1){dx/=length;dy/=length;}if(length>0){this.angle=Math.atan2(dy,dx);const p=this.moveOnGround(this.x,this.y,dx*HEROES[this.hero].speed*dt,dy*HEROES[this.hero].speed*dt,17);this.x=p.x;this.y=p.y;}
             this.ability=Math.max(0,this.ability-dt);this.updateDrops(dt);
             this.render();
             if (this.countdown <= 0) {
@@ -722,9 +767,9 @@ export class ArenaScene extends Phaser.Scene {
                 this.slash(110, 190, Math.PI * 2);
         }
         const speed = this.dash > 0 ? 650 : HEROES[this.hero].speed * (1 + this.u('speed') * .08 + this.meta('speed') * .05 + (this.momentum > 0 ? .1 : 0) + (this.boostSpeed>0?.25:0)+(this.speedBurst>0?.3:0)+(this.options.build==='mobility'?.08:0)) * (blocking ? .55 : 1);
-        this.x+=dx*speed*dt;this.y+=dy*speed*dt;
+        {const p=this.moveOnGround(this.x,this.y,dx*speed*dt,dy*speed*dt,17);this.x=p.x;this.y=p.y;}
         const targetInReach=this.enemies.some(e=>e.active&&Math.hypot(e.x-this.x,e.y-this.y)<(isGun(this.weapon)?520:WEAPONS[this.weapon].range*(1+this.u('range')*.25)+e.r+25));
-        if (this.attacking && this.attack <= 0&&(!this.touch?.enabled||targetInReach))this.basicAttack();
+        if (this.attack <= 0&&targetInReach)this.basicAttack();
         // Major encounters must not be stuck behind a deferred ordinary pack.
         for(let i=this.spawnIndex;i<this.plan.length&&this.plan[i].time<=this.waveTime;i++){const pack=this.plan[i];if(pack.count>0&&['boss','shooterBoss','commander'].includes(pack.type)){this.spawn(pack.type);pack.count--;}}
         const localCrowd=this.enemies.filter(e=>e.active&&Math.hypot(e.x-this.x,e.y-this.y)<240).length;
@@ -803,7 +848,7 @@ export class ArenaScene extends Phaser.Scene {
             e.attack -= dt;
             if(e.type==='boss'&&e.chargeTime>0){
                 const oldX=e.x,oldY=e.y,remaining=e.chargeTime,step=Math.min(dt,remaining),ratio=step/remaining;
-                e.x+=(e.targetX-e.x)*ratio;e.y+=(e.targetY-e.y)*ratio;e.chargeTime=Math.max(0,remaining-dt);
+                {const p=this.moveOnGround(e.x,e.y,(e.targetX-e.x)*ratio,(e.targetY-e.y)*ratio,e.r);e.x=p.x;e.y=p.y;}e.chargeTime=Math.max(0,remaining-dt);
                 const vx=e.x-oldX,vy=e.y-oldY,length=vx*vx+vy*vy,t=length?Phaser.Math.Clamp(((this.x-oldX)*vx+(this.y-oldY)*vy)/length,0,1):0;
                 if(!e.chargeHit&&Math.hypot(this.x-oldX-vx*t,this.y-oldY-vy*t)<70){e.chargeHit=true;this.hurt(e.damage,e,Math.atan2(vy,vx));}
                 this.particle(oldX,oldY,0xb19a79,45,5,.35);
@@ -873,7 +918,7 @@ export class ArenaScene extends Phaser.Scene {
                     }
                     else if (d < e.r + 65) {
                         this.hurt(e.damage, e, a + Math.PI);
-                        this.x+=dx/d*25;this.y+=dy/d*25;
+                        {const p=this.moveOnGround(this.x,this.y,dx/d*25,dy/d*25,17);this.x=p.x;this.y=p.y;}
                     }
                 }
                 continue;
@@ -917,9 +962,9 @@ export class ArenaScene extends Phaser.Scene {
                 e.targetX = this.x;
                 e.targetY = this.y;
             }
+            if(this.mapCars.length&&!this.decoy)moveAngle=wreckSteering(e.x,e.y,this.x,this.y,e.r,this.mapCars);
             const wobble = e.type === 'runner' ? Math.sin(this.elapsed * 6 + e.x) * .35 : 0;
-            e.x+=Math.cos(moveAngle+wobble)*speed*dt;
-            e.y+=Math.sin(moveAngle+wobble)*speed*dt;
+            {const p=this.moveOnGround(e.x,e.y,Math.cos(moveAngle+wobble)*speed*dt,Math.sin(moveAngle+wobble)*speed*dt,e.r);e.x=p.x;e.y=p.y;}
             const cx = Math.floor(e.x / 64), cy = Math.floor(e.y / 64);
             let checks = 0;
             for (let ix = -1; ix <= 1; ix++)
@@ -935,6 +980,7 @@ export class ArenaScene extends Phaser.Scene {
                             }
                         }
                 }
+            {const p=separateWrecks(e.x,e.y,e.r,this.mapCars);e.x=p.x;e.y=p.y;}
             if (d < e.r + 17 && !['brute','cleaver','spear','rifle','shooterBoss','commander'].includes(e.type) && e.attack <= 0) {
                 this.hurt(e.damage, e, a + Math.PI);
                 e.attack = .9;

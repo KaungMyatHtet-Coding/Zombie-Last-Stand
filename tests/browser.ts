@@ -1,4 +1,5 @@
 import {weaponPose} from '../src/weapon-effects';
+import {updateHud} from '../src/hud-dom';
 import Phaser from 'phaser';
 import { ArenaScene } from '../src/combat';
 import { AudioManager } from '../src/audio';
@@ -17,11 +18,24 @@ catch (e) {
 function ok(v: unknown) { if (!v)
     throw Error('Assertion failed'); }
 const save = freshSave();
+check('HUD updates preserve button identity and focus across changing threats and cooldowns',()=>{
+ const host=document.createElement('div');document.body.append(host);
+ updateHud(host,'<div class="combat-hud"><button data-hud="pause">Pause</button><button data-hud="ability" disabled>3s</button></div>');
+ const pause=host.querySelector<HTMLButtonElement>('[data-hud="pause"]')!,ability=host.querySelector('[data-hud="ability"]');pause.focus();
+ for(let i=0;i<20;i++)updateHud(host,`${i%2?'<div class="edge-threat">Threat</div>':''}<div class="combat-hud"><button data-hud="pause">Pause</button><button data-hud="ability" aria-label="Ready">Ready</button></div>`);
+ ok(host.querySelector('[data-hud="pause"]')===pause&&document.activeElement===pause);
+ ok(host.querySelector('[data-hud="ability"]')===ability&&!ability!.hasAttribute('disabled')&&ability!.textContent==='Ready');host.remove();
+});
 const scene = new ArenaScene(save, new AudioManager(), () => { }, () => { }, () => { });
 const game = new Phaser.Game({ type: Phaser.CANVAS, parent: 'fixture', width: 1200, height: 760, scene: [scene], audio: { noAudio: true } });
 game.events.once('ready', () => {
     setTimeout(() => {
         game.loop.stop();
+        check('Map view doubles visible world dimensions without resizing the canvas',()=>{
+ const width=game.canvas.width,height=game.canvas.height;scene.save.settings.mapView=1;scene.applyMapView();const standard=scene.cameras.main.zoom;
+ scene.save.settings.mapView=2;scene.applyMapView();ok(scene.cameras.main.zoom===standard/2&&game.canvas.width===width&&game.canvas.height===height);
+ scene.save.settings.mapView=1;scene.applyMapView();
+ });
         check('Corrupt and prototype-name saves recover', () => { const s = validateSave({ version: 1, heroes: ['toString', '__proto__'], weapons: ['constructor'], gold: NaN }); ok(s.heroes.length === 1 && s.weapons.length === 4 && s.gold === 0); });
         check('Purchases are persisted and selected compatible gear recovers', () => { const saved = localStorage.getItem('zombie-last-stand.v1'); try {
             const s = freshSave();
@@ -71,6 +85,13 @@ game.events.once('ready', () => {
  });
  check('Level-up cards continue beyond wave 19',()=>{
  scene.stats.wave=20;scene.paused=false;scene.hp=50;scene.xp=scene.xpNeed;scene.updateDrops(0);ok(scene.paused);scene.paused=false;
+ });
+ check('Laptop auto-attacks without a held mouse and abilities activate',()=>{
+ const oldHero=scene.hero,oldWeapon=scene.weapon;scene.hero='gunner';scene.weapon='pistols';scene.touch={enabled:false,x:0,y:0};scene.paused=false;scene.ended=false;scene.countdown=0;scene.strongStop=0;scene.attack=0;scene.reload=0;scene.ammo=12;scene.plan=[];scene.waveTime=0;
+ for(const e of scene.enemies)e.active=false;for(const b of scene.bullets)b.active=false;
+ scene.spawn('basic');const target=scene.enemies.find(e=>e.active)!;target.x=scene.x+100;target.y=scene.y;target.hp=10000;
+ scene.update(0,16);ok(scene.bullets.some(b=>b.active&&!b.hostile));
+ scene.ability=0;scene.activate(0,0);ok(scene.overdrive>0&&scene.ability>0);scene.overdrive=0;scene.hero=oldHero;scene.weapon=oldWeapon;
  });
  check('Hero knockback is reduced 35% and boss attacks use normal timing',()=>{
  for(const e of scene.enemies)e.active=false;scene.spawn('basic');const e=scene.enemies.find(e=>e.active)!;e.x=scene.x+100;e.y=scene.y;e.hp=10000;scene.hit(e,1,100);ok(Math.abs(e.x-scene.x-165)<.001);

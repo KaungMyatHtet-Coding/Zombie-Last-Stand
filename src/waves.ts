@@ -46,6 +46,11 @@ export function wavePlan(w: number, random=Math.random): Spawn[] {
         if (w % 5 === 0)
             out.push({ time: 0, type: 'boss', count: 1, formation: 0 });
     }
+    // Small extra flanks compensate for early wave-clear cards without raising health.
+    if(w>=4&&w<=10){
+        out.push({time:18,type:'basic',count:2,formation:1});
+        if(w>=6)out.push({time:32,type:'runner',count:1,formation:3});
+    }
     if(w>=8){
         // Extra ordinary packs add crowd pressure without multiplying elite or boss counts.
         const extra=Math.round(Math.min(180,80+(w-8)*16)*encounterRhythm(w).density);

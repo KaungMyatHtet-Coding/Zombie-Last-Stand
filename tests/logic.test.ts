@@ -22,3 +22,11 @@ test('upgrade choices unique, class restricted and level capped', () => { for (l
     assert.ok(choices.every(u => (!u.hero || u.hero === 'ninja') && u.id !== 'double'));
 } });
 test('damage critical armour and cooldown bounds', () => { assert.equal(damageValue(100, 1, true), 180); assert.equal(damageValue(100, 1, false, true), 55); assert.equal(cooldownValue(7, 1, .2), 5.6000000000000005); assert.ok(cooldownValue(.01, 100, 1) >= .08); });
+
+test('early waves exclude armed late enemies and retain one final boss',()=>{
+ for(let w=1;w<=10;w++){
+  const plan=wavePlan(w);
+  assert.ok(plan.every(p=>!['cleaver','spear','shooterBoss'].includes(p.type)));
+  assert.equal(plan.filter(p=>p.type==='boss').reduce((n,p)=>n+p.count,0),w===10?1:0);
+ }
+});
