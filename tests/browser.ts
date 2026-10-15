@@ -31,6 +31,17 @@ const game = new Phaser.Game({ type: Phaser.CANVAS, parent: 'fixture', width: 12
 game.events.once('ready', () => {
     setTimeout(() => {
         game.loop.stop();
+        check('Wave ten boss drops one magnet that collects distant XP and gold once',()=>{
+          scene.stats.wave=10;scene.spawn('boss');
+          const boss=scene.enemies.find(e=>e.active&&e.type==='boss')!;boss.x=scene.x+300;boss.y=scene.y;scene.kill(boss);
+          ok(scene.bossMagnet?.active);scene.drop(scene.x+3000,scene.y,25,false);scene.drop(scene.x-3000,scene.y,30,true);
+          const xp=scene.xp,gold=scene.save.gold;scene.xpNeed=100000;
+          scene.x=scene.bossMagnet!.x;scene.y=scene.bossMagnet!.y;
+          for(let i=0;i<240;i++)scene.updateDrops(1/60);
+          ok(!scene.bossMagnet!.active&&scene.xp>=xp+25&&scene.save.gold>=gold+30&&!scene.drops.some(d=>d.active&&d.vacuum));
+          const after=scene.save.gold;scene.collectBossMagnet();ok(scene.save.gold===after);
+          scene.bossMagnet=undefined;scene.stats.wave=1;
+        });
         check('Map view doubles visible world dimensions without resizing the canvas',()=>{
  const width=game.canvas.width,height=game.canvas.height;scene.save.settings.mapView=1;scene.applyMapView();const standard=scene.cameras.main.zoom;
  scene.save.settings.mapView=2;scene.applyMapView();ok(scene.cameras.main.zoom===standard/2&&game.canvas.width===width&&game.canvas.height===height);

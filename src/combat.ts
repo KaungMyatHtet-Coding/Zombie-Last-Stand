@@ -1,3 +1,5 @@
+import {drawSupply,drawBeacon,drawMagnet} from './supply-art';
+import {drawHealSupply} from './heal-supply';
 import {mapObstaclesNear,parkBlend,separateWrecks,wreckSteering,type Wreck} from './map-ground';
 import {assistedAim,escapeDirection,routedSpawn,buildSynergies,COMBAT_CACHE_KILLS} from './combat-feel';
 import {HERO_IDENTITIES,encounterRhythm,weaponMilestone} from './run-design';
@@ -74,6 +76,7 @@ type Drop = {
     y: number;
     value: number;
     gold: boolean;
+    vacuum?: boolean;
 };
 type Particle = {
     active: boolean;
@@ -235,7 +238,8 @@ export class ArenaScene extends Phaser.Scene {
     }
     createLandmark(){
         const kind=(['cache','beacon','patrol'] as const)[(this.stats.wave-1)%3],angle=this.random()*Math.PI*2;
-        const x=this.x+Math.cos(angle)*420,y=this.y+Math.sin(angle)*420;
+        const desiredX=this.x+Math.cos(angle)*420,desiredY=this.y+Math.sin(angle)*420;
+        const {x,y}=this.stats.wave<=10?separateWrecks(desiredX,desiredY,65,mapObstaclesNear(desiredX,desiredY)): {x:desiredX,y:desiredY};
         this.landmark={kind,x,y,progress:0,done:false,guards:[]};
     }
     updateLandmark(dt:number){
@@ -248,7 +252,7 @@ export class ArenaScene extends Phaser.Scene {
         if(l.kind==='cache')this.hp=Math.min(this.maxHp,this.hp+this.maxHp*.2);
         if(l.kind==='beacon')this.xp+=Math.ceil(this.xpNeed*.6);
         if(l.kind==='patrol')this.rewardShield=Math.max(1,this.rewardShield);
-        this.objectiveComplete(l.kind==='cache'?'SUPPLY WRECK · HEAL + GOLD':l.kind==='beacon'?'BEACON SECURED · XP + GOLD':'ELITE PATROL · SHIELD + GOLD');
+        this.objectiveComplete(l.kind==='cache'?'HEALING SUPPLY · HEAL + GOLD':l.kind==='beacon'?'BEACON SECURED · XP + GOLD':'ELITE PATROL · SHIELD + GOLD');
         this.impactRing(l.x,l.y,100,0xa9c4b0);
     }
     updateEvent(dt:number){
@@ -261,6 +265,13 @@ export class ArenaScene extends Phaser.Scene {
     enemies: Enemy[] = [];
     bullets: Bullet[] = [];
     drops: Drop[] = [];
+    bossMagnet: {x:number;y:number;active:boolean;born:number}|undefined;
+    collectBossMagnet(){
+        if(!this.bossMagnet?.active)return;
+        this.bossMagnet.active=false;
+        for(const d of this.drops)if(d.active)d.vacuum=true;
+        this.notifyCombat("XP & gold collected");this.audio.play("buy");
+    }
     particles: Particle[] = [];
     numbers: {
         text: Phaser.GameObjects.Text;
@@ -336,7 +347,7 @@ export class ArenaScene extends Phaser.Scene {
     }
     get maxAmmo() { return (this.weapon === 'shotgun' ? 6 : this.weapon==='smg'?28:12) + this.u('magazine') * 4; }
     startWave() { if(this.floorTheme !== (this.stats.wave>10?1:0)){this.drawFloor();this.cameras.main.fadeIn(900,15,8,12);} this.boostDamage=this.pendingReward==='damage'?15:0;this.boostSpeed=this.pendingReward==='speed'?15:0;this.pendingReward=undefined;this.eventName=waveEvent(this.stats.wave);if(this.stats.wave<=10)this.eventName=({2:'Supply rush',4:'Hold the zone',6:'Elite hunt',8:'Supply rush',10:'Boss encounter'} as Record<number,string>)[this.stats.wave]||'Survival';this.waveObjectives=0;this.zoneSpawnClock=5;this.bossDefeated=false;this.supplies=[];this.huntTarget=undefined;this.zone={x:this.x+180,y:this.y,progress:0,done:false};this.hazard=undefined;this.hazardClock=8;
-        if(this.eventName==='Supply rush')this.supplies=Array.from({length:3},(_,i)=>({x:this.x+Math.cos(i*2.1)*260,y:this.y+Math.sin(i*2.1)*260,active:true}));
+        if(this.eventName==='Supply rush')this.supplies=Array.from({length:3},(_,i)=>{const x=this.x+Math.cos(i*2.1)*260,y=this.y+Math.sin(i*2.1)*260;return {...(this.stats.wave<=10?separateWrecks(x,y,65,mapObstaclesNear(x,y)):{x,y}),active:true};});
         this.createLandmark();this.waveTime = 0; this.spawnIndex = 0; this.plan = wavePlan(this.stats.wave,this.random); this.waveStats = { kills: 0, gold: 0, damage: 0, time: 0 }; this.waiting = false;if(this.evolved('ward'))this.rewardShield=Math.max(this.rewardShield,3); this.waveWard = !!this.u('ward'); if(this.eventName==='Elite hunt'){this.spawn('elite');this.huntTarget=this.enemies.find(e=>e.active&&e.type==='elite');} this.audio.play('wave'); this.banner(`WAVE ${String(this.stats.wave).padStart(2, '0')} · ${this.eventName.toUpperCase()}`, 0x9eefae); }
     banner(message: string, color = 0xffffff) { const t = this.add.text(this.cameras.main.width/2, 125, message, { fontFamily: 'monospace', fontSize: Math.min(26,Math.max(13,this.cameras.main.width/32))+'px', color: '#' + color.toString(16).padStart(6, '0'), fontStyle: 'bold' }).setOrigin(.5).setScrollFactor(0); this.tweens.add({ targets: t, alpha: 0, y: 100, delay: 1400, duration: 600, onComplete: () => t.destroy() }); }
     spawn(type: EnemyId, side = Math.floor(this.random() * 4), offset = this.random()) {
@@ -437,7 +448,7 @@ export class ArenaScene extends Phaser.Scene {
         this.stats.kills++;this.master('kills',1);
         if(e===this.huntTarget){this.huntTarget=undefined;this.grantGold(250+this.stats.wave*15);this.objectiveComplete('ELITE BOUNTY CLAIMED');}
         if(['shooterBoss','commander'].includes(e.type)){this.grantGold(400+this.stats.wave*20);this.hp=Math.min(this.maxHp,this.hp+this.maxHp*.15);this.objectiveComplete('MINI-BOSS DEFEATED · GOLD + RECOVERY');}
-        if(e.type==='boss'){this.bossDefeated=true;this.grantGold(300+this.stats.wave*20);this.hp=Math.min(this.maxHp,this.hp+this.maxHp*.2);this.master('bosses',1);this.banner('BOSS DEFEATED · RECOVERY + GOLD',0xd8ba85);}
+        if(e.type==='boss'){if(this.stats.wave===10&&!this.bossMagnet){const p=this.stats.wave<=10?separateWrecks(e.x,e.y,45,mapObstaclesNear(e.x,e.y)):{x:e.x,y:e.y};this.bossMagnet={...p,active:true,born:this.elapsed};}this.bossDefeated=true;this.grantGold(300+this.stats.wave*20);this.hp=Math.min(this.maxHp,this.hp+this.maxHp*.2);this.master('bosses',1);this.banner('BOSS DEFEATED · RECOVERY + GOLD',0xd8ba85);}
         this.waveStats.kills++;
         this.combo = this.comboTime > 0 ? this.combo + 1 : 1;
         this.comboTime = 4;
@@ -483,7 +494,7 @@ export class ArenaScene extends Phaser.Scene {
             d = {} as Drop;
             this.drops.push(d);
         }
-        Object.assign(d, { active: true, x, y, value, gold });
+        Object.assign(d, { active: true, x, y, value, gold, vacuum:false });
     }
     shoot(x: number, y: number, a: number, damage: number, hostile = false, pierce = 0, explosive = false, last = false, kind:'round'|'wind'|'phantom'='round',source='Poison shot') {
         let b = this.bullets.find(b => !b.active);
@@ -655,6 +666,10 @@ export class ArenaScene extends Phaser.Scene {
     }
     finishWave() {
         if(this.waiting||this.ended)return;
+        if(this.stats.wave===10&&this.bossMagnet){
+            if(this.bossMagnet.active){if(this.elapsed-this.bossMagnet.born<6)return;this.collectBossMagnet();return;}
+            if(this.drops.some(d=>d.active&&d.vacuum))return;
+        }
         if(this.finiteRun&&this.stats.wave===10&&(!this.bossDefeated||this.enemies.some(e=>e.active&&e.type==='boss')))return;
         this.earned=earnedWaveGold(this.stats.wave,this.waveStats.kills,this.waveStats.damage,this.waveObjectives);
         const earnedGold=this.earned.combat+this.earned.perfect+this.earned.objective;this.grantGold(earnedGold);
@@ -1046,14 +1061,15 @@ export class ArenaScene extends Phaser.Scene {
         }
     }
     updateDrops(dt: number) {
+        if(this.bossMagnet?.active&&Math.hypot(this.x-this.bossMagnet.x,this.y-this.bossMagnet.y)<40)this.collectBossMagnet();
         for (const d of this.drops) {
             if (!d.active)
                 continue;
             const dx = this.x - d.x, dy = this.y - d.y, dist = Math.hypot(dx, dy);
             const radius = BALANCE.magnet * (1 + this.u('magnet') * .3 + (d.gold ? this.meta('magnet') * .05 : 0));
-            if (dist < radius) {
-                d.x += dx * dt * 8;
-                d.y += dy * dt * 8;
+            if (d.vacuum || dist < radius) {
+                d.x += dx * Math.min(1,dt * 8);
+                d.y += dy * Math.min(1,dt * 8);
             }
             if (dist < 22) {
                 d.active = false;
@@ -1088,12 +1104,16 @@ export class ArenaScene extends Phaser.Scene {
         for(const m of this.reinforcementMarks){g.lineStyle(3,0x9ebad6,m.life/1.2);g.strokeCircle(m.x,m.y,18+8*(1.2-m.life));g.lineBetween(m.x-7,m.y,m.x+7,m.y);g.lineBetween(m.x,m.y-7,m.x,m.y+7);}
         for(const p of this.firePatches){g.fillStyle(0xbd7347,.18);g.fillCircle(p.x,p.y,45);g.lineStyle(2,0xd0a05c,.65);g.strokeCircle(p.x,p.y,30+Math.sin(this.elapsed*8)*5);}
         if(this.speedBurst>0){g.lineStyle(4,0xb7a5da,.45);g.lineBetween(this.x,this.y,this.x-Math.cos(this.angle)*65,this.y-Math.sin(this.angle)*65);}
-        if(this.landmark&&!this.landmark.done){const l=this.landmark,color=l.kind==='beacon'?0x91bccc:l.kind==='patrol'?0xc8a18d:0xb5c796;g.lineStyle(5,0x19242b);g.strokeCircle(l.x,l.y,36);g.lineStyle(2,color);g.strokeCircle(l.x,l.y,36);g.fillStyle(0x202d34);g.fillRoundedRect(l.x-20,l.y-15,40,30,5);g.lineStyle(3,color);if(l.kind==='beacon'){g.lineBetween(l.x,l.y-25,l.x,l.y+16);g.strokeCircle(l.x,l.y-21,6);g.lineStyle(2,color,.4);g.strokeCircle(l.x,l.y,95);g.beginPath();g.arc(l.x,l.y,42,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(1,l.progress/6));g.strokePath();}else if(l.kind==='cache'){g.lineBetween(l.x-9,l.y,l.x+9,l.y);g.lineBetween(l.x,l.y-9,l.x,l.y+9);}else{g.strokeTriangle(l.x,l.y-12,l.x-12,l.y+10,l.x+12,l.y+10);}}
-        for(const c of this.supplies)if(c.active){g.fillStyle(0x202b30);g.fillRoundedRect(c.x-18,c.y-15,36,30,4);g.lineStyle(2,0xc8b98c);g.strokeRect(c.x-18,c.y-15,36,30);g.lineBetween(c.x-8,c.y,c.x+8,c.y);g.lineBetween(c.x,c.y-8,c.x,c.y+8);}
+        if(this.landmark&&!this.landmark.done&&this.landmark.kind==='cache')drawHealSupply(g,this.landmark.x,this.landmark.y,this.elapsed);
+        if(this.landmark&&!this.landmark.done&&this.landmark.kind==='beacon'){const l=this.landmark;drawBeacon(g,l.x,l.y,this.elapsed,l.progress);}
+        if(this.landmark&&!this.landmark.done&&this.landmark.kind==='patrol'){const l=this.landmark;g.fillStyle(0x588dc9);g.lineStyle(3,0x162c36);g.fillTriangle(l.x-19,l.y-18,l.x+19,l.y-18,l.x,l.y+24);g.strokeTriangle(l.x-19,l.y-18,l.x+19,l.y-18,l.x,l.y+24);}
+        for(const c of this.supplies)if(c.active)drawSupply(g,c.x,c.y,this.elapsed);
+        if(this.bossMagnet?.active)drawMagnet(g,this.bossMagnet.x,this.bossMagnet.y,this.elapsed);
         if(this.eventName==='Hold the zone'&&!this.zone.done){g.lineStyle(3,0x8caeac,.75);g.strokeCircle(this.zone.x,this.zone.y,140);g.lineStyle(6,0xc5b58d,.9);g.beginPath();g.arc(this.zone.x,this.zone.y,140,-Math.PI/2,-Math.PI/2+Math.PI*2*this.zone.progress/20);g.strokePath();}
         if(this.hazard){g.lineStyle(4,0x1e252a,.95);g.strokeCircle(this.hazard.x,this.hazard.y,67);g.lineStyle(2,0xca876e,.9);g.strokeCircle(this.hazard.x,this.hazard.y,63);g.fillStyle(0x9b5a38,this.hazard.time<1?.5:.12);g.fillCircle(this.hazard.x,this.hazard.y,63);}
         for (const d of this.drops)
             if (d.active) {
+                if(d.vacuum){const a=Math.atan2(this.y-d.y,this.x-d.x);g.lineStyle(2,d.gold?0xffd16d:0x78d9dc,.5);g.lineBetween(d.x,d.y,d.x-Math.cos(a)*18,d.y-Math.sin(a)*18);}
                 g.fillStyle(d.gold ? 0xffd16d : 0x78d9dc);
                 if (d.gold)
                     g.fillCircle(d.x, d.y, 5);
@@ -1208,8 +1228,10 @@ export class ArenaScene extends Phaser.Scene {
         if(this.boostDamage>0){g.lineStyle(2,0xc29979,.8);g.strokeCircle(this.x,this.y,27);}
         if(this.boostSpeed>0){g.lineStyle(3,0x829fa9,.8);for(let i=0;i<3;i++)g.lineBetween(this.x-20-i*8,this.y+10,this.x-28-i*8,this.y+10);}
         if (this.countdown > 0) {
-            g.fillStyle(0x0a101d, .5);
-            g.fillRect(this.x-800, this.y-600, 1600, 1200);
+            const camera = this.cameras.main;
+            const width = camera.width / camera.zoom, height = camera.height / camera.zoom;
+            g.fillStyle(0x0a101d, .18);
+            g.fillRect(this.x-width/2-2, this.y-height/2-2, width+4, height+4);
         }
     }
 }
