@@ -1,0 +1,12 @@
+import '../src/style.css';
+import {upgradeChoices} from '../src/upgrades';
+import {visualUpgradeCard} from '../src/upgrade-ui';
+import {EVOLUTION_STAGES} from '../src/run-design';
+import {evolutionOptions} from '../src/progression';
+import {evolutionPreview} from '../src/evolution-preview';
+import {artImage} from '../src/art';
+const levels={orbit:3,damage:2,fire:4};
+const options=upgradeChoices('ninja',levels,()=>.15,'kama',11,{});
+document.querySelector('#cards')!.innerHTML=options.map((u,i)=>visualUpgradeCard(u,i,'ninja','kama',levels[u.id as keyof typeof levels]||0)).join('');
+document.querySelector('#weapons')!.innerHTML=evolutionOptions('ninja').map(e=>`<article class="upgrade">${evolutionPreview('ninja',e.id,1,'kama')}<h3>${e.name}</h3><p>${EVOLUTION_STAGES[e.id].awakening}</p></article>`).join('');
+document.querySelector('#bosses')!.innerHTML=['shooterBoss','commander'].map(id=>`<article class="upgrade"><div class="enemy-art">${artImage('enemy',id)}</div><h3>${id==='commander'?'Horde Commander':'Siege Gunner'}</h3></article>`).join('');

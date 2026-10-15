@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {heroTechniques,techniqueDemo} from '../src/mastery';
+import {WEAPONS} from '../src/config';
+import {freshSave,purchase,compatible} from '../src/save';
+import {upgradeChoices} from '../src/upgrades';
+import {upgradeValues} from '../src/upgrade-ui';
+test('each hero has distinct named techniques and readable locked demonstrations',()=>{const names=new Set<string>();for(const hero of ['ninja','samurai','gunner','tank'] as const){const ts=heroTechniques(hero);assert.deepEqual(ts.map(t=>t.kills),[0,100,250]);for(const t of ts){assert.ok(t.effect&&t.trigger);names.add(t.name);assert.ok(techniqueDemo(hero,t.id).includes('demonstration'));}}assert.equal(names.size,12);});
+test('four new weapons can be bought and equipped by the intended hero',()=>{const s=freshSave();s.gold=10000;for(const [id,hero] of [['kama','ninja'],['naginata','samurai'],['smg','gunner'],['hammer','tank']] as const){assert.ok(purchase(s,'weapons',id));assert.ok(compatible(hero,id));assert.ok(s.weapons.includes(id));}});
+test('hammer builds never receive shield-only upgrades',()=>{for(let i=0;i<50;i++)assert.ok(upgradeChoices('tank',{},Math.random,'hammer').every(u=>!['stamina','block','reflect','spikes'].includes(u.id)));});
+test('card values display real current and next damage percentages',()=>{const u={id:'damage',name:'Damage',icon:'',description:'',max:5};assert.deepEqual(upgradeValues(u,2),{before:'+24% damage',after:'+36% damage'});});

@@ -1,0 +1,18 @@
+export type TouchState={enabled:boolean,x:number,y:number};
+export function joystickVector(dx:number,dy:number,radius=48){const distance=Math.hypot(dx,dy);if(distance<6)return {x:0,y:0};const scale=Math.min(distance/radius,1)/distance;return {x:dx*scale,y:dy*scale};}
+export class TouchControls {
+ state:TouchState={enabled:matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0,x:0,y:0};
+ element=document.createElement('div');private pointer:number|null=null;private stick:HTMLElement;private knob:HTMLElement;private ability:HTMLButtonElement;private origin={x:0,y:0};
+ setLayout(side:'left'|'right',size:number){this.element.classList.toggle('right-handed',side==='right');this.element.style.setProperty('--stick-size',size+'px');}
+ constructor(onAbility:()=>void){this.element.id='touch-controls';this.element.innerHTML='<div class="touch-stick" aria-label="Movement and aim joystick"><div class="stick-rings"></div><div class="stick-knob"></div><span>MOVE & AIM</span></div><button class="touch-ability" aria-label="Use character ability"><i class="ability-symbol" aria-hidden="true">➤</i><b>READY</b><span>ABILITY</span></button>';document.body.append(this.element);this.stick=this.element.querySelector('.touch-stick')!;this.knob=this.element.querySelector('.stick-knob')!;this.ability=this.element.querySelector('.touch-ability')!;
+ this.stick.addEventListener('pointerdown',e=>{if(this.pointer!==null)return;e.preventDefault();this.state.enabled=true;this.pointer=e.pointerId;this.stick.setPointerCapture(e.pointerId);const rect=this.stick.getBoundingClientRect();this.origin={x:rect.left+rect.width/2,y:rect.top+rect.height/2};this.stick.classList.add('engaged');this.move(e);});
+ this.stick.addEventListener('pointermove',e=>{if(e.pointerId===this.pointer){e.preventDefault();this.move(e);}});
+ for(const event of ['pointerup','pointercancel','lostpointercapture'])this.stick.addEventListener(event,()=>this.reset());
+ this.ability.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();onAbility();});
+ window.addEventListener('blur',this.reset);document.addEventListener('visibilitychange',this.reset);
+ }
+ private move(e:PointerEvent){const v=joystickVector(e.clientX-this.origin.x,e.clientY-this.origin.y,this.stick.clientWidth*.34);this.state.x=v.x;this.state.y=v.y;this.knob.style.transform=`translate(${v.x*this.stick.clientWidth*.3}px,${v.y*this.stick.clientWidth*.3}px)`;}
+ reset=()=>{this.stick?.classList.remove('engaged');this.pointer=null;this.state.x=0;this.state.y=0;this.knob.style.transform='translate(0,0)';};
+ update(active:boolean,cooldown:number,name:string,maxCooldown=1,icon='➤'){this.element.style.display=active&&this.state.enabled?'block':'none';if(!active)this.reset();this.ability.style.setProperty('--cooldown-progress',Math.min(100,Math.max(0,100-cooldown/Math.max(1,maxCooldown)*100))+'%');this.ability.querySelector('i')!.textContent=icon;this.ability.setAttribute('aria-label','Use '+name);this.ability.disabled=cooldown>0;this.ability.classList.toggle('ready',cooldown<=0);this.ability.querySelector('b')!.textContent=cooldown>0?cooldown.toFixed(1)+'s':'READY';this.ability.querySelector('span')!.textContent=name;}
+ destroy(){window.removeEventListener('blur',this.reset);document.removeEventListener('visibilitychange',this.reset);this.element.remove();}
+}

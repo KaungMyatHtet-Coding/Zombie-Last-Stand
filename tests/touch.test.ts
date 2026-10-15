@@ -1,0 +1,2 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {joystickVector} from '../src/touch';
+test('joystick dead zone, analog strength and directional clamp',()=>{assert.deepEqual(joystickVector(2,3),{x:0,y:0});assert.deepEqual(joystickVector(24,0),{x:.5,y:0});const v=joystickVector(100,100);assert.ok(Math.abs(Math.hypot(v.x,v.y)-1)<1e-9);assert.equal(v.x,v.y);assert.deepEqual(joystickVector(-100,0),{x:-1,y:0});});

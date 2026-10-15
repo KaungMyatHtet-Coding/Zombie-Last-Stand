@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {assistedAim,escapeDirection,routedSpawn,buildSynergies,comboHint} from '../src/combat-feel';
+import {freshSave,validateSave} from '../src/save';
+import {upgradeChoices} from '../src/upgrades';
+const target=(x:number,y:number)=>({active:true,x,y,r:18});
+test('aim assistance prioritizes forward targets and catches close pursuers without changing movement',()=>{assert.equal(assistedAim(0,0,0,150,[target(-80,0)]),Math.PI);assert.equal(assistedAim(0,0,0,150,[target(-40,0),target(90,0)]),0);assert.equal(assistedAim(0,0,1,150,[]),1);assert.equal(assistedAim(0,0,0,100,[target(-300,0)]),0);});
+test('spawn routing leaves the least crowded direction available',()=>{const es=[target(100,0),target(100,40),target(0,80),target(0,-80)];const exit=escapeDirection(0,0,es,0);assert.ok(Math.cos(exit)<0);assert.deepEqual(routedSpawn(1,.5,390,844,0),{side:0,offset:.5});assert.deepEqual(routedSpawn(0,.5,390,844,0),{side:0,offset:.5});});
+test('synergies require compatible builds and expose actionable hints',()=>{assert.ok(buildSynergies('samurai',{fire:1,wind:1},{reach:0,power:0,tempo:0}).every(s=>s.active));assert.equal(buildSynergies('ninja',{}, {reach:0,power:0,tempo:0}).filter(s=>s.active).length,0);assert.ok(buildSynergies('ninja',{double:1},{reach:0,power:0,tempo:0}).find(s=>s.id==='shadow')?.active);assert.equal(comboHint('samurai','wind',{}, {reach:0,power:0,tempo:0}),'STEEL REVERSAL');});
+test('mobile aim assistance defaults on and can be disabled persistently',()=>{assert.equal(freshSave().settings.aimAssist,true);assert.equal(validateSave({version:1}).settings.aimAssist,true);const save=freshSave();save.settings.aimAssist=false;assert.equal(validateSave(save).settings.aimAssist,false);});
+test('early cards include a meaningful hero technique without duplicate choices',()=>{for(const hero of ['ninja','samurai','gunner','tank'] as const){for(const random of [()=>0,()=>.5,()=>.999]){const cards=upgradeChoices(hero,{},random,hero==='tank'?'hammer':undefined);assert.equal(new Set(cards.map(c=>c.id)).size,cards.length);assert.ok(cards.some(c=>c.hero===hero));}}});
