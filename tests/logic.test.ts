@@ -1,3 +1,4 @@
+import {ENEMIES} from '../src/config';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { waveBudget, scaling, wavePlan, damageValue, cooldownValue } from '../src/waves';
@@ -29,4 +30,11 @@ test('early waves exclude armed late enemies and retain one final boss',()=>{
   assert.ok(plan.every(p=>!['cleaver','spear','shooterBoss'].includes(p.type)));
   assert.equal(plan.filter(p=>p.type==='boss').reduce((n,p)=>n+p.count,0),w===10?1:0);
  }
+});
+
+test('waves one to ten grow in threat budget and use exactly the nine approved zombies',()=>{
+ const allowed=new Set(['basic','runner','spitter','armoured','brute','elite','rifle','commander','boss']);
+ const seen=new Set<string>();let previous=0;
+ for(let w=1;w<=10;w++){const plan=wavePlan(w);let threat=0;for(const p of plan){assert.ok(allowed.has(p.type));seen.add(p.type);threat+=ENEMIES[p.type].cost*p.count;}assert.ok(threat>previous,`wave ${w} increases threat`);previous=threat;}assert.equal(seen.size,9);
+ assert.ok(wavePlan(7).some(p=>p.type==='rifle'));assert.ok(wavePlan(9).some(p=>p.type==='commander'));
 });

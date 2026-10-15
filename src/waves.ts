@@ -11,7 +11,16 @@ export type Spawn = {
 export function wavePlan(w: number, random=Math.random): Spawn[] {
     if (w === 1)
         return [{ time: 0, type: 'basic', count: 4, formation: 0 }, { time: 6, type: 'basic', count: 3, formation: 1 }, { time: 6, type: 'runner', count: 1, formation: 1 }, { time: 12, type: 'basic', count: 3, formation: 2 }, { time: 18, type: 'runner', count: 2, formation: 3 }, { time: 24, type: 'basic', count: 3, formation: 0 }, { time: 24, type: 'runner', count: 1, formation: 0 }, { time: 30, type: 'basic', count: 3, formation: 2 }, { time: 35, type: 'brute', count: 1, formation: 1 }];
-    const counts: Partial<Record<EnemyId, number>>[] = [{}, {}, { basic: 20, runner: 6, brute: 1 }, { basic: 18, runner: 5, spitter: 3 }, { basic: 22, runner: 4, brute: 2, elite: 1 }, { basic: 35, runner: 6, spitter: 2 }, { basic: 18, armoured: 6, spitter: 4 }, { basic: 20, runner: 8, spitter: 4, brute: 2 }, { basic: 24, armoured: 5, elite: 1 }, { basic: 40, brute: 5, spitter: 4 }, { boss: 1, basic: 36, runner: 8 }];
+    const counts: Partial<Record<EnemyId, number>>[] = [{}, {},
+      {basic:20,runner:6,brute:1},
+      {basic:23,runner:7,spitter:3},
+      {basic:26,runner:8,spitter:4,brute:2},
+      {basic:30,runner:9,spitter:5,brute:3,elite:1},
+      {basic:34,runner:10,spitter:6,brute:3,armoured:5},
+      {basic:38,runner:12,spitter:6,brute:4,armoured:6,rifle:2},
+      {basic:44,runner:14,spitter:7,brute:4,armoured:7,rifle:3,elite:1},
+      {basic:48,runner:16,spitter:8,brute:5,armoured:8,rifle:4,commander:1},
+      {basic:54,runner:18,spitter:8,brute:5,armoured:9,rifle:5,boss:1}];
     const out: Spawn[] = [];
     if (w <= 10) {
         for (const [type, n] of Object.entries(counts[w])) {
@@ -19,7 +28,7 @@ export function wavePlan(w: number, random=Math.random): Spawn[] {
             let i = 0;
             while (left > 0) {
                 const count = Math.min(left, type === 'basic' ? 4 : 2);
-                out.push({ time: type === 'boss' ? 0 : Math.min(39, i * 7 + (type === 'basic' ? 0 : 4)), type: type as EnemyId, count, formation: i % 6 });
+                out.push({ time: type === 'boss' ? 0 : type==='commander'?20: Math.min(39, i * 38 / Math.max(1,Math.ceil(n/(type==='basic'?4:2))-1) + (type === 'basic' ? 0 : 2)), type: type as EnemyId, count, formation: i % 6 });
                 left -= count;
                 i++;
             }
@@ -46,12 +55,7 @@ export function wavePlan(w: number, random=Math.random): Spawn[] {
         if (w % 5 === 0)
             out.push({ time: 0, type: 'boss', count: 1, formation: 0 });
     }
-    // Small extra flanks compensate for early wave-clear cards without raising health.
-    if(w>=4&&w<=10){
-        out.push({time:18,type:'basic',count:2,formation:1});
-        if(w>=6)out.push({time:32,type:'runner',count:1,formation:3});
-    }
-    if(w>=8){
+    if(w>10){
         // Extra ordinary packs add crowd pressure without multiplying elite or boss counts.
         const extra=Math.round(Math.min(180,80+(w-8)*16)*encounterRhythm(w).density);
         const batches=Math.ceil(extra/8);
@@ -62,7 +66,7 @@ export function wavePlan(w: number, random=Math.random): Spawn[] {
         }
     }
     // Three short gaps let players collect drops without stopping the encounter.
-    if(w>=8)for(const spawn of out)if(spawn.time>=12&&spawn.time<15||spawn.time>=26&&spawn.time<29)spawn.time+=3;
+    if(w>=3)for(const spawn of out)if(spawn.time>=12&&spawn.time<15||spawn.time>=26&&spawn.time<29)spawn.time=Math.min(39,spawn.time+3);
     return out.sort((a, b) => a.time - b.time);
 }
 export const damageValue = (base: number, multiplier: number, crit: boolean, armour = false) => Math.round(base * multiplier * (crit ? 1.8 : 1) * (armour ? .55 : 1));

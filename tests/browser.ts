@@ -148,6 +148,7 @@ game.events.once('ready', () => {
  for(const e of scene.enemies)e.active=false;for(const b of scene.bullets)b.active=false;scene.spawn('shooterBoss');const shooter=scene.enemies.find(e=>e.active)!;shooter.x=scene.x+100;shooter.y=scene.y;shooter.telegraph=.01;shooter.targetX=scene.x;shooter.targetY=scene.y;scene.updateEnemies(.02);scene.updateEnemies(.15);scene.updateEnemies(.15);ok(scene.bullets.filter(b=>b.active&&b.hostile).length>=3);shooter.active=false;scene.spawn('commander');const c=scene.enemies.find(e=>e.active)!;c.x=scene.x+100;c.y=scene.y;c.telegraph=.01;scene.updateEnemies(.02);ok(c.commandTime>0&&scene.count>=5);
  });
  check('General charge travels along its locked path and does not teleport or track the hero',()=>{
+ scene.mapCars=[];
  for(const e of scene.enemies)e.active=false;scene.firePatches=[];scene.spawn('boss');const b=scene.enemies.find(e=>e.active)!;scene.x=600;scene.y=600;b.x=400;b.y=380;b.targetX=600;b.targetY=380;b.phase=2;b.telegraph=.01;b.attack=4;scene.updateEnemies(.02);ok(b.x===400&&b.chargeTime===.65);scene.updateEnemies(.2);ok(b.x>400&&b.x<600&&b.y===380);scene.updateEnemies(.5);ok(b.x===600&&b.y===380&&b.chargeTime===0);
  });
  check('Hero identities reward movement, separate hits, reloads and close combat',()=>{
@@ -169,8 +170,8 @@ game.events.once('ready', () => {
  for(const b of scene.bullets)b.active=false;scene.shoot(scene.x+70,scene.y,Math.PI,10,true);scene.counter=.5;scene.invuln=0;scene.rewardShield=0;scene.waveWard=false;scene.hurt(10,undefined,0,'Rifle shot');ok(scene.bullets.some(b=>b.active&&!b.hostile&&b.source==='Steel Reversal'));for(const b of scene.bullets)b.active=false;scene.shoot(scene.x+1,scene.y,Math.PI,10,true);scene.counter=.5;scene.invuln=0;scene.updateBullets(.001);ok(scene.bullets.some(b=>b.active&&!b.hostile&&b.source==='Steel Reversal'));
  scene.hero='ninja';scene.weapon='katana';scene.levels={double:1};scene.clone=0;scene.dash=.2;scene.synergyClock=0;scene.kill(es[0]);ok(scene.clone>=3&&scene.clone<=8);scene.dash=0;
  });
- check('Earned combat caches and early wave milestones award XP once with clear damage direction',()=>{
- for(const e of scene.enemies)e.active=false;scene.landmark=undefined;scene.hero='ninja';scene.levels={};scene.stats.kills=9;scene.combatCaches.clear();scene.spawn('basic');const e=scene.enemies.find(e=>e.active)!;scene.xp=0;scene.xpNeed=100;scene.kill(e);ok(scene.xp===45&&scene.combatCaches.has(10));scene.invuln=0;scene.counter=0;scene.rewardShield=0;scene.waveWard=false;scene.hp=scene.maxHp;e.x=scene.x-50;e.y=scene.y;scene.hurt(1,e,0);ok(Math.cos(scene.damageFeedback.angle)<-.99);scene.stats.wave=3;scene.waveStats.kills=40;scene.waveStats.damage=1;scene.waiting=false;scene.ended=false;scene.finishWave();ok(scene.xp>=145);
+ check('Combat caches grant XP, early wave clears grant no bonus level-ups, damage direction remains clear',()=>{
+ for(const e of scene.enemies)e.active=false;scene.landmark=undefined;scene.hero='ninja';scene.levels={};scene.stats.kills=9;scene.combatCaches.clear();scene.spawn('basic');const e=scene.enemies.find(e=>e.active)!;scene.xp=0;scene.xpNeed=100;scene.kill(e);ok(scene.xp===45&&scene.combatCaches.has(10));scene.invuln=0;scene.counter=0;scene.rewardShield=0;scene.waveWard=false;scene.hp=scene.maxHp;e.x=scene.x-50;e.y=scene.y;scene.hurt(1,e,0);ok(Math.cos(scene.damageFeedback.angle)<-.99);scene.stats.wave=3;scene.waveStats.kills=40;scene.waveStats.damage=1;scene.waiting=false;scene.ended=false;scene.finishWave();ok(scene.xp===45);
  });
  check('Gunner piercing splits once and Tank Slam leaves a damaging aftershock',()=>{
  for(const e of scene.enemies)e.active=false;for(const b of scene.bullets)b.active=false;scene.hero='gunner';scene.weapon='pistols';scene.levels={pierce:1,ricochet:1};scene.evolution={reach:0,power:0,tempo:0};scene.spawn('brute');scene.spawn('brute');const targets=scene.enemies.filter(e=>e.active);targets[0].x=scene.x+80;targets[0].y=scene.y;targets[1].x=scene.x+120;targets[1].y=scene.y+60;targets.forEach(e=>e.hp=10000);scene.shoot(targets[0].x,targets[0].y,0,2,false,1);const original=scene.bullets.find(b=>b.active)!;scene.updateBullets(.001);ok(original.vy===0&&scene.bullets.filter(b=>b.active&&b.source==='Crossfire').length===1);
@@ -178,6 +179,29 @@ game.events.once('ready', () => {
  });
  check('Crowd pressure defers ordinary packs without postponing the boss',()=>{
  for(const e of scene.enemies)e.active=false;scene.landmark=undefined;scene.hero='ninja';scene.weapon='katana';scene.levels={};scene.pendingStrikes=[];scene.pendingEchoes=[];scene.firePatches=[];scene.touch=undefined;scene.paused=false;scene.ended=false;scene.countdown=0;scene.strongStop=0;scene.waveTime=1;scene.spawnPulse=0;scene.spawnIndex=0;scene.plan=[{time:0,type:'basic',count:4,formation:0},{time:0,type:'boss',count:1,formation:0}];scene.xp=0;scene.xpNeed=10000;for(let i=0;i<18;i++){const e=scene.spawn('basic')!;e.x=scene.x+100+Math.cos(i)*20;e.y=scene.y+Math.sin(i)*20;}scene.update(0,16);ok(scene.plan[0].count===4&&scene.enemies.some(e=>e.active&&e.type==='boss'));
+ });
+ check('Wave five grants one hero awakening and late waves ignore its power',()=>{
+ scene.options.mode='endless';scene.stats.wave=5;scene.waiting=false;scene.ended=false;scene.earlyAwakened=false;scene.finishWave();ok(scene.earlyAwakened&&scene.earlyPower);scene.stats.wave=11;ok(!scene.earlyPower);
+ });
+ check('Only XP causes upgrade choices; damage labels merge in a crowded early fight',()=>{
+ scene.stats.wave=4;scene.xp=scene.xpNeed;scene.paused=false;let choices=0;const original=scene.onChoice;scene.onChoice=wave=>{if(!wave)choices++;};scene.updateDrops(0);ok(choices===1&&scene.paused);scene.onChoice=original;
+ scene.numbers.forEach(n=>n.life=0);scene.number(100,100,10);scene.number(100,100,15);ok(scene.numbers.filter(n=>n.life>0).length===1&&scene.numbers.find(n=>n.life>0)!.text.text==='25');
+ });
+ check('Final boss clears pursuit and final magnet XP reaches mastery before victory',()=>{
+ scene.options.mode='short';scene.stats.wave=10;scene.ended=false;scene.waiting=false;scene.bossDefeated=false;scene.bossMagnet=undefined;scene.spawn('basic');scene.spawn('boss');const boss=scene.enemies.find(e=>e.active&&e.type==='boss')!;scene.kill(boss);ok(!scene.enemies.some(e=>e.active));scene.xp=200;scene.collectBossMagnet();for(let i=0;i<240;i++)scene.updateDrops(1/60);scene.finishWave();ok(scene.victory&&scene.extractionMastery>=10);
+ });
+ check('Healing feedback reports actual HP restored and stays silent at full health',()=>{
+ scene.hp=96;scene.maxHp=100;scene.hpChanges=[];scene.heal(20);ok(scene.hp===100&&scene.hpChanges[0].delta===4);scene.hpChanges=[];scene.heal(10);ok(scene.hpChanges.length===0);scene.showHpChange(-4);scene.showHpChange(-6);ok(scene.hpChanges.length===2&&scene.hpChanges[0].delta===-4&&scene.hpChanges[1].delta===-6&&scene.hpChanges[0].id!==scene.hpChanges[1].id);
+ });
+ check('Two Wanderers produce separate real bite damage and popups; repeated bites and dash remain protected',()=>{
+ scene.ended=false;scene.paused=false;scene.hero='ninja';scene.weapon='katana';scene.counter=0;scene.rewardShield=0;scene.waveWard=false;scene.invuln=0;scene.hp=100;scene.maxHp=100;scene.hpChanges=[];scene.enemies.forEach(e=>e.active=false);const first=scene.spawn('basic')!,second=scene.spawn('basic')!;
+ scene.hurt(4,first,0,'Zombie bite',true);scene.hurt(4,second,0,'Zombie bite',true);ok(scene.hp===92&&scene.hpChanges.length===2&&scene.hpChanges.every(p=>p.delta===-4));scene.hurt(4,first,0,'Zombie bite',true);ok(scene.hp===92&&scene.hpChanges.length===2);
+ scene.ability=0;scene.activate(1,0);const third=scene.spawn('basic')!;scene.hurt(4,third,0,'Zombie bite',true);ok(scene.hp===92&&scene.hpChanges.length===2);
+ });
+ check('Robot factory and gardens share stable coordinates and movement collision in both directions',()=>{
+ scene.stats.wave=11;scene.robotOrigin={x:600,y:380};scene.x=600;scene.y=380;scene.drawFloor();scene.render();ok(scene.robotSector==='ROBOT FACTORY'&&scene.mapCars.length>0);const anchor=scene.robotOrigin;const floors=scene.children.list.filter((child):child is Phaser.GameObjects.Image=>child instanceof Phaser.GameObjects.Image&&child.visible&&child.texture.key==='robot-factory-ground');ok(floors.length>0&&floors.every(image=>image.frame.name==='__BASE'));
+ scene.x=3400;scene.render();ok(scene.robotSector==='REACTOR GARDENS'&&scene.robotOrigin===anchor);scene.x=600;scene.render();ok(scene.robotSector==='ROBOT FACTORY'&&scene.robotOrigin===anchor);
+ const prop=scene.mapCars[0];const p=scene.moveOnGround(prop.x,prop.y,1,0,17);ok(Math.abs(p.x-prop.x)>=prop.halfW+17||Math.abs(p.y-prop.y)>=prop.halfH+17);
  });
  lines.push(`\n${failures ? `${failures} CHECKS FAILED` : 'ALL 36 INTEGRATION CHECKS PASSED'}`);
         out.textContent = lines.join('\n');

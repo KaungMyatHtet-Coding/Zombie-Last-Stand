@@ -3,7 +3,7 @@ export function updateHud(container: HTMLElement, html: string) {
   const template = document.createElement('template');
   template.innerHTML = html;
   const key = (node: Node) => node instanceof Element
-    ? `${node.tagName}:${node.getAttribute('data-hud') || ''}:${node.classList[0] || ''}`
+    ? `${node.tagName}:${node.getAttribute('data-hp-popup') || node.getAttribute('data-hud') || ''}:${node.classList[0] || ''}`
     : node.nodeType.toString();
   function patch(parent: Node, incoming: Node) {
     let current: Node | null = parent.firstChild;

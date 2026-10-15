@@ -1,3 +1,5 @@
+import {RobotMapArt} from './robot-map-art';
+import {robotPropsNear,reactorBlend,type RobotOrigin} from './robot-map';
 import {drawSupply,drawBeacon,drawMagnet} from './supply-art';
 import {drawHealSupply} from './heal-supply';
 import {mapObstaclesNear,parkBlend,separateWrecks,wreckSteering,type Wreck} from './map-ground';
@@ -104,9 +106,10 @@ export class ArenaScene extends Phaser.Scene {
     parkTiles:Phaser.GameObjects.Image[]=[];
     wreckImages:Phaser.GameObjects.Image[]=[];
     mapCars:Wreck[]=[];
-    preload(){this.load.image('park-ground','/assets/maps/park-cartoon.png');this.load.image('city-asphalt','/assets/maps/city-asphalt-cartoon.png');this.load.image('city-wreck','/assets/maps/wreck-sedan-cartoon.png');}
+    robotArt:RobotMapArt|undefined;
+    preload(){for(const key of ['robot-factory-ground','robot-garden-ground','robot-factory-props','robot-garden-props'])this.load.image(key,`/assets/maps/${key}.png`);this.load.image('park-ground','/assets/maps/park-cartoon.png');this.load.image('city-asphalt','/assets/maps/city-asphalt-cartoon.png');this.load.image('city-wreck','/assets/maps/wreck-sedan-cartoon.png');}
     moveOnGround(x:number,y:number,dx:number,dy:number,r:number){
-        if(this.stats.wave>10||!this.mapCars.length)return {x:x+dx,y:y+dy};
+        if(!this.mapCars.length)return {x:x+dx,y:y+dy};
         // Substeps prevent dash and knockback from crossing a thin chassis.
         const steps=Math.max(1,Math.ceil(Math.hypot(dx,dy)/12));
         for(let i=0;i<steps;i++){const p=separateWrecks(x+dx/steps,y+dy/steps,r,this.mapCars);x=p.x;y=p.y;}
@@ -135,6 +138,8 @@ export class ArenaScene extends Phaser.Scene {
     attack = 0;
     ability = 0;
     invuln = 0;
+    private invulnFromBite=false;
+    private biteCooldowns=new WeakMap<Enemy,number>();
     dash = 0;
     dashX = 0;
     dashY = 0;
@@ -172,6 +177,16 @@ export class ArenaScene extends Phaser.Scene {
     bossDefeated=false;
     lastCause='The horde';
     damageFeedback={time:0,angle:0,value:0,label:''};
+    hpChanges:{id:number;delta:number;until:number}[]=[];
+    hpChangeSequence=0;
+    showHpChange(delta:number){
+        if(!delta)return;
+        const now=this.time.now;
+        this.hpChanges=this.hpChanges.filter(change=>change.until>now);
+        this.hpChanges.push({id:++this.hpChangeSequence,delta,until:now+850});
+    }
+    heal(amount:number){const before=this.hp;this.hp=Math.min(this.maxHp,this.hp+amount);this.showHpChange(this.hp-before);}
+
     hitConfirm={time:0,x:0,y:0,crit:false};
     combatNotice={time:0,label:''};
     combatCaches=new Set<number>();
@@ -184,6 +199,10 @@ export class ArenaScene extends Phaser.Scene {
     get finiteRun(){return this.options.mode!=='endless';}
     awakened:EvolutionId|undefined;
     fullEvolution=false;
+    earlyAwakened=false;
+    extractionMastery=0;
+    get earlyPower(){return this.earlyAwakened&&this.stats.wave<=10;}
+    get earlyTechnique(){return ({ninja:"Shadow Edge · +5% critical chance",samurai:"Tempered Edge · +12% weapon damage",gunner:"Hot Chamber · +10% fire rate",tank:"Iron Impact · +20% knockback"})[this.hero];}
     get evolutionDue(){return !!weaponMilestone(this.stats.wave,!!this.awakened,this.fullEvolution);}
     identityCharge=0;
     openingShots=0;
@@ -224,7 +243,7 @@ export class ArenaScene extends Phaser.Scene {
     rewardPool(){return rollReward(this.hp,this.maxHp);}
     grantGold(n:number){this.stats.gold+=n;this.waveStats.gold+=n;this.save.gold+=n;}
     grantReward(id:RewardId){
-        if(id==='heal')this.hp=Math.min(this.maxHp,this.hp+this.maxHp*.25);
+        if(id==='heal')this.heal(this.maxHp*.25);
         if(id==='gold')this.grantGold(40+this.stats.wave*8);
         if(id==='shield')this.rewardShield=3;
         if(id==='damage'||id==='speed')this.pendingReward=id;
@@ -239,7 +258,7 @@ export class ArenaScene extends Phaser.Scene {
     createLandmark(){
         const kind=(['cache','beacon','patrol'] as const)[(this.stats.wave-1)%3],angle=this.random()*Math.PI*2;
         const desiredX=this.x+Math.cos(angle)*420,desiredY=this.y+Math.sin(angle)*420;
-        const {x,y}=this.stats.wave<=10?separateWrecks(desiredX,desiredY,65,mapObstaclesNear(desiredX,desiredY)): {x:desiredX,y:desiredY};
+        const {x,y}=this.clearGroundPoint(desiredX,desiredY,65);
         this.landmark={kind,x,y,progress:0,done:false,guards:[]};
     }
     updateLandmark(dt:number){
@@ -249,7 +268,7 @@ export class ArenaScene extends Phaser.Scene {
         if(l.kind==='beacon'){if(distance<95)l.progress+=dt;if(l.progress<6)return;}
         else if(l.guards.some(e=>e.active)||distance>65)return;
         l.done=true;this.grantGold(90+this.stats.wave*12);
-        if(l.kind==='cache')this.hp=Math.min(this.maxHp,this.hp+this.maxHp*.2);
+        if(l.kind==='cache')this.heal(this.maxHp*.2);
         if(l.kind==='beacon')this.xp+=Math.ceil(this.xpNeed*.6);
         if(l.kind==='patrol')this.rewardShield=Math.max(1,this.rewardShield);
         this.objectiveComplete(l.kind==='cache'?'HEALING SUPPLY · HEAL + GOLD':l.kind==='beacon'?'BEACON SECURED · XP + GOLD':'ELITE PATROL · SHIELD + GOLD');
@@ -257,7 +276,7 @@ export class ArenaScene extends Phaser.Scene {
     }
     updateEvent(dt:number){
         this.updateLandmark(dt);
-        for(const c of this.supplies)if(c.active&&Math.hypot(c.x-this.x,c.y-this.y)<35){c.active=false;this.hp=Math.min(this.maxHp,this.hp+this.maxHp*.15);this.grantGold(80+this.stats.wave*10);this.objectiveComplete('SUPPLY SECURED · HEAL + GOLD');}
+        for(const c of this.supplies)if(c.active&&Math.hypot(c.x-this.x,c.y-this.y)<35){c.active=false;this.heal(this.maxHp*.15);this.grantGold(80+this.stats.wave*10);this.objectiveComplete('SUPPLY SECURED · HEAL + GOLD');}
         if(this.eventName==='Elite hunt'&&this.huntTarget&&!this.huntTarget.active){this.huntTarget=undefined;this.grantGold(250+this.stats.wave*15);this.objectiveComplete('ELITE BOUNTY CLAIMED');}
         if(this.eventName==='Hold the zone'&&!this.zone.done&&Math.hypot(this.x-this.zone.x,this.y-this.zone.y)<140){this.zone.progress+=dt;this.zoneSpawnClock-=dt;if(this.zoneSpawnClock<=0){this.zoneSpawnClock=5;this.spawn('runner');this.spawn('basic');}if(this.zone.progress>=20){this.zone.done=true;this.grantGold(300+this.stats.wave*15);this.rewardShield=3;this.objectiveComplete('ZONE SECURED · SHIELD + GOLD');}}
         if(this.stats.wave>10&&!this.recovery){this.hazardClock-=dt;if(this.hazardClock<=0){this.hazardClock=12;this.hazard={x:this.x+Math.cos(this.angle)*75,y:this.y+Math.sin(this.angle)*75,time:3};}if(this.hazard){this.hazard.time-=dt;if(this.hazard.time<1&&Math.hypot(this.x-this.hazard.x,this.y-this.hazard.y)<65)this.hurt(8,undefined,Math.atan2(this.hazard.y-this.y,this.hazard.x-this.x));if(this.hazard.time<=0)this.hazard=undefined;}}
@@ -280,17 +299,24 @@ export class ArenaScene extends Phaser.Scene {
     grid = new Map<string, Enemy[]>();
     dashHits = new Set<Enemy>();
     constructor(save: Save, audio: AudioManager, choice: (wave: boolean) => void, end: () => void, pause: () => void, options?:RunOptions) { super('arena'); this.save = save; this.audio = audio; this.hero = save.hero; this.weapon = save.weapon; this.onChoice = choice; this.onEnd = end; this.onPause = pause; if(options){this.options=options;this.hero=options.hero||save.hero;this.weapon=options.weapon||save.weapon;} if(this.options.seed!==undefined){this.random=seededRandom(this.options.seed);this.cardRandom=seededRandom(this.options.seed^0x85ebca6b);}if(!techniqueUnlocked(save.mastery[this.hero]?.kills||0,this.options.technique))this.options.technique='standard'; }
-    create() { const park=this.textures.get('park-ground'),pw=Math.floor(park.getSourceImage().width/5),ph=Math.floor(park.getSourceImage().height/5);for(let y=0;y<5;y++)for(let x=0;x<5;x++)park.add(`${x}-${y}`,0,x*pw,y*ph,pw,ph); this.textures.get('city-wreck').add('chassis',0,150,18,810,1395); this.floor = this.add.graphics().setDepth(-4); this.gfx = this.add.graphics();this.warningGfx=this.add.graphics().setDepth(6); this.drawFloor(); this.visuals = new ArenaVisuals(this); this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,ESC,M,ONE,TWO,THREE') as typeof this.keys; this.input.keyboard!.on('keydown-ESC', () => this.onPause()); this.input.keyboard!.on('keydown-M', () => { this.save.settings.sound = !this.save.settings.sound; this.audio.sound = this.save.settings.sound; }); this.input.keyboard!.addCapture(['W', 'A', 'S', 'D', 'UP', 'DOWN', 'LEFT', 'RIGHT', 'SPACE']); const h = HEROES[this.hero]; this.maxHp = h.hp * (1 + this.meta('health') * .05); if(this.options.build==='guard')this.maxHp*=1.15;if(this.options.mode!=='daily'&&this.masteryKills>=100)this.maxHp*=1.05;this.hp = this.maxHp; this.rerolls = 1 + this.meta('reroll'); this.ammo=this.maxAmmo;this.applyMapView(); this.startWave(); }
+    create() { this.robotArt=new RobotMapArt(this);const park=this.textures.get('park-ground'),pw=Math.floor(park.getSourceImage().width/5),ph=Math.floor(park.getSourceImage().height/5);for(let y=0;y<5;y++)for(let x=0;x<5;x++)park.add(`${x}-${y}`,0,x*pw,y*ph,pw,ph); this.textures.get('city-wreck').add('chassis',0,150,18,810,1395); this.floor = this.add.graphics().setDepth(-4); this.gfx = this.add.graphics();this.warningGfx=this.add.graphics().setDepth(6); this.drawFloor(); this.visuals = new ArenaVisuals(this); this.keys = this.input.keyboard!.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,ESC,M,ONE,TWO,THREE') as typeof this.keys; this.input.keyboard!.on('keydown-ESC', () => this.onPause()); this.input.keyboard!.on('keydown-M', () => { this.save.settings.sound = !this.save.settings.sound; this.audio.sound = this.save.settings.sound; }); this.input.keyboard!.addCapture(['W', 'A', 'S', 'D', 'UP', 'DOWN', 'LEFT', 'RIGHT', 'SPACE']); const h = HEROES[this.hero]; this.maxHp = h.hp * (1 + this.meta('health') * .05); if(this.options.build==='guard')this.maxHp*=1.15;if(this.options.mode!=='daily'&&this.masteryKills>=100)this.maxHp*=1.05;this.hp = this.maxHp; this.rerolls = 1 + this.meta('reroll'); this.ammo=this.maxAmmo;this.applyMapView(); this.startWave(); }
     applyMapView(){this.cameras.main.setZoom(1.05/(this.save.settings.mapView||1));this.cameras.main.centerOn(this.x,this.y);}
     floorTheme = 0;
+    robotOrigin:RobotOrigin|undefined;
+    get robotSector(){if(this.stats.wave<=10||!this.robotOrigin)return '';const blend=reactorBlend(this.x,this.y,this.robotOrigin);return blend<.25?'ROBOT FACTORY':blend>.75?'REACTOR GARDENS':'SERVICE PASSAGE';}
+    clearGroundPoint(x:number,y:number,r:number){const obstacles=this.stats.wave>10?robotPropsNear(x,y,this.robotOrigin||{x:this.x,y:this.y}):mapObstaclesNear(x,y);return separateWrecks(x,y,r,obstacles);}
     floorLabels: Phaser.GameObjects.Text[] = [];
     drawFloor() {
         this.floor.clear();for(const l of this.floorLabels)l.destroy();this.floorLabels=[];
         this.floorTheme=this.stats.wave>10?1:0;
+        if(this.floorTheme&&!this.robotOrigin)this.robotOrigin={x:this.x,y:this.y};
     }
     drawWorld(){
-        const g=this.floor,robot=this.stats.wave>10,view=this.cameras.main.worldView;
+        const g=this.floor,robot=this.stats.wave>10,camera=this.cameras.main;
+        const width=camera.width/camera.zoom,height=camera.height/camera.zoom;
+        const view={x:this.x-width/2,y:this.y-height/2,right:this.x+width/2,bottom:this.y+height/2,width,height};
         g.clear();
+        if(!robot)this.robotArt?.hide();
         let tileIndex=0;
         if(!robot)for(let row=Math.floor(view.y/640)-1;row<=Math.ceil(view.bottom/640)+1;row++)for(let col=Math.floor(view.x/640)-1;col<=Math.ceil(view.right/640)+1;col++){
             let tile=this.groundTiles[tileIndex];if(!tile){tile=this.add.image(0,0,'city-asphalt').setOrigin(0).setDepth(-5);this.groundTiles.push(tile);}
@@ -305,6 +331,13 @@ export class ArenaScene extends Phaser.Scene {
             tile.setVisible(true).setTexture('park-ground',`${fx}-${fy}`).setPosition(col*128,row*128).setDisplaySize(129,129).setFlip(flipX,flipY).setAlpha(alpha);parkIndex++;
         }
         for(let i=parkIndex;i<this.parkTiles.length;i++)this.parkTiles[i].setVisible(false);
+        if(robot){
+            const origin=this.robotOrigin??(this.robotOrigin={x:this.x,y:this.y});
+            const props=robotPropsNear(this.x,this.y,origin,Math.max(view.width,view.height)+200);
+            this.mapCars=props;this.robotArt?.render(view,origin,props);
+            for(const image of this.wreckImages)image.setVisible(false);
+            return;
+        }
         this.mapCars=robot?[]:mapObstaclesNear(this.x,this.y,Math.max(view.width,view.height)+200);
         const size=robot?192:640;
         if(robot){g.fillStyle(0x202b35);g.fillRect(view.x-100,view.y-100,view.width+200,view.height+200);}
@@ -347,7 +380,7 @@ export class ArenaScene extends Phaser.Scene {
     }
     get maxAmmo() { return (this.weapon === 'shotgun' ? 6 : this.weapon==='smg'?28:12) + this.u('magazine') * 4; }
     startWave() { if(this.floorTheme !== (this.stats.wave>10?1:0)){this.drawFloor();this.cameras.main.fadeIn(900,15,8,12);} this.boostDamage=this.pendingReward==='damage'?15:0;this.boostSpeed=this.pendingReward==='speed'?15:0;this.pendingReward=undefined;this.eventName=waveEvent(this.stats.wave);if(this.stats.wave<=10)this.eventName=({2:'Supply rush',4:'Hold the zone',6:'Elite hunt',8:'Supply rush',10:'Boss encounter'} as Record<number,string>)[this.stats.wave]||'Survival';this.waveObjectives=0;this.zoneSpawnClock=5;this.bossDefeated=false;this.supplies=[];this.huntTarget=undefined;this.zone={x:this.x+180,y:this.y,progress:0,done:false};this.hazard=undefined;this.hazardClock=8;
-        if(this.eventName==='Supply rush')this.supplies=Array.from({length:3},(_,i)=>{const x=this.x+Math.cos(i*2.1)*260,y=this.y+Math.sin(i*2.1)*260;return {...(this.stats.wave<=10?separateWrecks(x,y,65,mapObstaclesNear(x,y)):{x,y}),active:true};});
+        if(this.eventName==='Supply rush')this.supplies=Array.from({length:3},(_,i)=>{const x=this.x+Math.cos(i*2.1)*260,y=this.y+Math.sin(i*2.1)*260;return {...this.clearGroundPoint(x,y,65),active:true};});
         this.createLandmark();this.waveTime = 0; this.spawnIndex = 0; this.plan = wavePlan(this.stats.wave,this.random); this.waveStats = { kills: 0, gold: 0, damage: 0, time: 0 }; this.waiting = false;if(this.evolved('ward'))this.rewardShield=Math.max(this.rewardShield,3); this.waveWard = !!this.u('ward'); if(this.eventName==='Elite hunt'){this.spawn('elite');this.huntTarget=this.enemies.find(e=>e.active&&e.type==='elite');} this.audio.play('wave'); this.banner(`WAVE ${String(this.stats.wave).padStart(2, '0')} · ${this.eventName.toUpperCase()}`, 0x9eefae); }
     banner(message: string, color = 0xffffff) { const t = this.add.text(this.cameras.main.width/2, 125, message, { fontFamily: 'monospace', fontSize: Math.min(26,Math.max(13,this.cameras.main.width/32))+'px', color: '#' + color.toString(16).padStart(6, '0'), fontStyle: 'bold' }).setOrigin(.5).setScrollFactor(0); this.tweens.add({ targets: t, alpha: 0, y: 100, delay: 1400, duration: 600, onComplete: () => t.destroy() }); }
     spawn(type: EnemyId, side = Math.floor(this.random() * 4), offset = this.random()) {
@@ -379,10 +412,13 @@ export class ArenaScene extends Phaser.Scene {
         Object.assign(p, { active: true, x, y, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, life, max: life, color, size });
     }
     burst(x: number, y: number, color: number, n = 7) {
-        for (let i = 0; i < n; i++)
+        for (let i = 0; i < (this.stats.wave<=10&&this.enemies.filter(e=>e.active).length>22?Math.min(n,3):n); i++)
             this.particle(x, y, color, 50 + Math.random() * 130);
     }
     number(x: number, y: number, value: number, crit = false) {
+        const nearby=this.stats.wave<=10?this.numbers.find(n=>n.life>.35&&Math.hypot(n.text.x-(x-8),n.text.y-(y-20))<28):undefined;
+        if(nearby){nearby.text.setText(String(Number(nearby.text.text)+Math.round(value)));if(crit)nearby.text.setColor('#ffd87d');return;}
+        if(this.stats.wave<=10&&this.numbers.filter(n=>n.life>0).length>=18)return;
         let n = this.numbers.find(n => n.life <= 0);
         if (!n) {
             if (this.numbers.length > 45)
@@ -396,7 +432,7 @@ export class ArenaScene extends Phaser.Scene {
     hit(e: Enemy, base: number, knock = 20, bullet = false,elemental=true) {
         if (!e.active)
             return;
-        const crit = this.random() < .05 + this.u('crit') * .07, raw = damageValue(base, HEROES[this.hero].damage * (1 + this.u('damage') * .12 + this.meta('damage') * .05 + this.honour * .05 + (this.options.build==='assault'?.1:0) + (this.boostDamage>0?.4:0)), crit, bullet && e.type === 'armoured');
+        const crit = this.random() < .05 + (this.earlyPower&&this.hero==='ninja'?.05:0) + this.u('crit') * .07, raw = damageValue(base, HEROES[this.hero].damage * (1 + this.u('damage') * .12 + this.meta('damage') * .05 + this.honour * .05 + (this.options.build==='assault'?.1:0) + (this.boostDamage>0?.4:0) + (this.earlyPower&&this.hero==='samurai'?.12:0)), crit, bullet && e.type === 'armoured');
         const d=crit&&this.evolved('crit')?Math.round(raw*1.2):raw;
         const contactX=e.x,contactY=e.y;
         e.hp -= d;
@@ -409,7 +445,7 @@ export class ArenaScene extends Phaser.Scene {
         e.flash = .12;
         const heavy=!bullet&&['nodachi','hammer','shield','spiked'].includes(this.weapon);e.stagger=Math.max(e.stagger||0,(heavy?.22:bullet?.035:.08)*(['boss','shooterBoss','commander'].includes(e.type)?.25:1));
         const a = Math.atan2(e.y - this.y, e.x - this.x);
-        {const p=this.moveOnGround(e.x,e.y,Math.cos(a)*knock*.65,Math.sin(a)*knock*.65,e.r);e.x=p.x;e.y=p.y;}
+        {const p=this.moveOnGround(e.x,e.y,Math.cos(a)*knock*.65*(this.earlyPower&&this.hero==='tank'?1.2:1),Math.sin(a)*knock*.65*(this.earlyPower&&this.hero==='tank'?1.2:1),e.r);e.x=p.x;e.y=p.y;}
         if (this.u('bleed'))
             e.bleed = 3;
         this.number(e.x, e.y, d, crit);
@@ -442,13 +478,13 @@ export class ArenaScene extends Phaser.Scene {
         this.visuals.death(e, this.elapsed);
         e.active = false;
         if(this.landmark)this.landmark.guards=this.landmark.guards.filter(guard=>guard!==e);
-        if(this.evolved('bleed')&&e.bleed>0)this.hp=Math.min(this.maxHp,this.hp+2);
+        if(this.evolved('bleed')&&e.bleed>0)this.heal(2);
         if((this.evolved('fire')||this.evolution.power>=2)&&(e.burn>0||Math.hypot(e.x-this.x,e.y-this.y)<110)){if(this.firePatches.length>=20)this.firePatches.shift();this.firePatches.push({x:e.x,y:e.y,life:3});}
         if(this.evolved('regen')&&['elite','boss','shooterBoss','commander'].includes(e.type)){this.lifePulse=5;this.impactRing(this.x,this.y,65,0x8fbe9a);}
         this.stats.kills++;this.master('kills',1);
         if(e===this.huntTarget){this.huntTarget=undefined;this.grantGold(250+this.stats.wave*15);this.objectiveComplete('ELITE BOUNTY CLAIMED');}
-        if(['shooterBoss','commander'].includes(e.type)){this.grantGold(400+this.stats.wave*20);this.hp=Math.min(this.maxHp,this.hp+this.maxHp*.15);this.objectiveComplete('MINI-BOSS DEFEATED · GOLD + RECOVERY');}
-        if(e.type==='boss'){if(this.stats.wave===10&&!this.bossMagnet){const p=this.stats.wave<=10?separateWrecks(e.x,e.y,45,mapObstaclesNear(e.x,e.y)):{x:e.x,y:e.y};this.bossMagnet={...p,active:true,born:this.elapsed};}this.bossDefeated=true;this.grantGold(300+this.stats.wave*20);this.hp=Math.min(this.maxHp,this.hp+this.maxHp*.2);this.master('bosses',1);this.banner('BOSS DEFEATED · RECOVERY + GOLD',0xd8ba85);}
+        if(['shooterBoss','commander'].includes(e.type)){this.grantGold(400+this.stats.wave*20);this.heal(this.maxHp*.15);this.objectiveComplete('MINI-BOSS DEFEATED · GOLD + RECOVERY');}
+        if(e.type==='boss'){if(this.stats.wave===10&&!this.bossMagnet){const p=this.stats.wave<=10?separateWrecks(e.x,e.y,45,mapObstaclesNear(e.x,e.y)):{x:e.x,y:e.y};this.bossMagnet={...p,active:true,born:this.elapsed};}this.bossDefeated=true;if(this.stats.wave===10&&this.finiteRun){for(const enemy of this.enemies)if(enemy!==e)enemy.active=false;this.spawnIndex=this.plan.length;this.pendingStrikes=[];this.pendingEchoes=[];for(const bullet of this.bullets)if(bullet.hostile)bullet.active=false;}this.grantGold(300+this.stats.wave*20);this.heal(this.maxHp*.2);this.master('bosses',1);this.banner('BOSS DEFEATED · RECOVERY + GOLD',0xd8ba85);}
         this.waveStats.kills++;
         this.combo = this.comboTime > 0 ? this.combo + 1 : 1;
         this.comboTime = 4;
@@ -532,7 +568,7 @@ export class ArenaScene extends Phaser.Scene {
     }
     basicAttack() {
         const w = WEAPONS[this.weapon];
-        this.attack = cooldownValue(w.cooldown, HEROES[this.hero].rate * (1 + (this.momentum > 0 ? .1 * Math.min(3, Math.floor(this.combo / 5)) : 0))*(1+this.evolution.tempo*.1)*(this.overdrive>0?1.6:1));
+        this.attack = cooldownValue(w.cooldown, HEROES[this.hero].rate * (this.earlyPower&&this.hero==='gunner'?1.1:1) * (1 + (this.momentum > 0 ? .1 * Math.min(3, Math.floor(this.combo / 5)) : 0))*(1+this.evolution.tempo*.1)*(this.overdrive>0?1.6:1));
 
         if (this.hero === 'gunner') {
             if (this.reload > 0)
@@ -586,6 +622,7 @@ export class ArenaScene extends Phaser.Scene {
     }
     activate(dx:number,dy:number){
         if(this.ability>0||this.paused||this.ended)return;
+        this.invulnFromBite=false;
         const technique=this.options.technique;
         this.ability=cooldownValue(HEROES[this.hero].cooldown,1,this.u('cooldown')*.15)*(this.options.build==='mobility'?.9:1);
         this.master('abilities',1);this.dash=0;this.counter=0;
@@ -602,9 +639,11 @@ export class ArenaScene extends Phaser.Scene {
         if(technique==='fortified')this.decoy={x:this.x,y:this.y,life:4,angle:this.angle};
         this.dash=technique==='swift'?.55:.35;this.invuln=this.dash;this.dashX=Math.cos(a);this.dashY=Math.sin(a);this.dashHits.clear();this.audio.play('ability');
     }
-    hurt(value: number, e?: Enemy, a = 0,source='Desert hazard') {
-        if (this.invuln > 0)
+    hurt(value: number, e?: Enemy, a = 0,source='Desert hazard',bite=false) {
+        if(bite&&e&&(this.biteCooldowns.get(e)||0)>this.time.now)return;
+        if (this.invuln > 0 && !(bite&&e&&this.invulnFromBite))
             return;
+        this.invulnFromBite=false;
         if(this.rewardShield>0){this.damageFeedback={time:.5,angle:a,value:0,label:'SHIELD BLOCK'};this.rewardShield--;this.invuln=.4;this.burst(this.x,this.y,0x92acb9,8);return;}
         if (this.counter > 0) {
             this.counter = 0;
@@ -634,10 +673,13 @@ export class ArenaScene extends Phaser.Scene {
         if(e)a=Math.atan2(e.y-this.y,e.x-this.x);
         this.lastCause=e?ENEMIES[e.type].name:source;
         this.damageFeedback={time:.65,angle:a,value:Math.round(value),label:this.lastCause};
+        this.showHpChange(-Math.min(this.hp,value));
         this.hp -= value;
         this.stats.taken += value;
         this.waveStats.damage += value;
         this.invuln = BALANCE.invulnerability;
+        this.invulnFromBite=bite;
+        if(bite&&e)this.biteCooldowns.set(e,this.time.now+900);
         this.audio.play('hurt');
         this.burst(this.x, this.y, 0xff718a, 12);
         if (this.save.settings.shake)
@@ -652,15 +694,15 @@ export class ArenaScene extends Phaser.Scene {
     apply(id: string) {
         if(id.startsWith('evolve:')){const base=id.slice(7),card=UPGRADES.find(u=>u.id===base);if(!card||!CARD_EVOLUTIONS[base]||this.stats.wave<=10||this.u(base)<card.max||this.evolved(base))return;this.cardEvolutions[base]=true;this.save.archive[`card:${base}`]=2;
             if(['health','wide','crit','magnet','regen','damage','cooldown','range','bleed','counter','magazine','pierce','reload','stamina','block','spikes','rush'].includes(base))this.levels[base]++;
-            if(base==='health'){this.maxHp*=1.15;this.hp=Math.min(this.maxHp,this.hp+this.maxHp*.35);}this.reveal(CARD_EVOLUTIONS[base].name);this.audio.play('level');this.paused=false;return;
+            if(base==='health'){this.maxHp*=1.15;this.heal(this.maxHp*.35);}this.reveal(CARD_EVOLUTIONS[base].name);this.audio.play('level');this.paused=false;return;
         }
         this.levels[id] = (this.levels[id] || 0) + 1;
         if (id === 'health') {
             this.maxHp *= 1.15;
-            this.hp = Math.min(this.maxHp, this.hp + this.maxHp * .15);
+            this.heal(this.maxHp * .15);
         }
         if (id === 'heal')
-            this.hp = Math.min(this.maxHp, this.hp + 30);
+            this.heal(30);
         this.audio.play('level');
         this.paused = false;
     }
@@ -674,9 +716,10 @@ export class ArenaScene extends Phaser.Scene {
         this.earned=earnedWaveGold(this.stats.wave,this.waveStats.kills,this.waveStats.damage,this.waveObjectives);
         const earnedGold=this.earned.combat+this.earned.perfect+this.earned.objective;this.grantGold(earnedGold);
         this.banner(`WAVE CLEAR · +${earnedGold} EARNED GOLD`,0xd8ba85);
-        if([3,6,8].includes(this.stats.wave)&&(this.earned.combat>0||this.waveObjectives>0)){this.xp+=this.xpNeed;this.notifyCombat('COMBAT MILESTONE · BONUS LEVEL-UP');}
+        if(this.stats.wave===5&&!this.earlyAwakened){this.earlyAwakened=true;this.reveal(this.earlyTechnique);}
+        if(this.stats.wave>10&&[3,6,8].includes(this.stats.wave)&&(this.earned.combat>0||this.waveObjectives>0)){this.xp+=this.xpNeed;this.notifyCombat('COMBAT MILESTONE · BONUS LEVEL-UP');}
 
-        if(this.finiteRun&&this.stats.wave===10){this.victory=true;this.ended=true;this.paused=true;this.stats.time=this.elapsed;this.master('victories',1);this.onEnd();return;}
+        if(this.finiteRun&&this.stats.wave===10){const masteryXp=Math.floor(this.xp/20);if(masteryXp>0){this.extractionMastery=masteryXp;this.master('kills',masteryXp);this.master('extractionBonus',masteryXp);}this.victory=true;this.ended=true;this.paused=true;this.stats.time=this.elapsed;this.master('victories',1);this.onEnd();return;}
         this.pendingStrikes=[];this.pendingEchoes=[];this.swing=0;
         this.waiting = true;
         this.paused = true;
@@ -689,7 +732,7 @@ export class ArenaScene extends Phaser.Scene {
         }
         if (this.waveStats.damage === 0)
             this.rerolls++;
-        this.hp = Math.min(this.maxHp, this.hp + this.maxHp * .08);
+        this.heal(this.maxHp * .08);
         this.audio.play('clear');
         this.onChoice(true);
     }
@@ -734,6 +777,7 @@ export class ArenaScene extends Phaser.Scene {
         this.swing = Math.max(0, this.swing - dt);
         this.ability = Math.max(0, this.ability - dt);
         this.invuln = Math.max(0, this.invuln - dt);
+        if(this.invuln<=0)this.invulnFromBite=false;
         this.counter = Math.max(0, this.counter - dt);
         this.momentum -= dt;
         this.comboTime -= dt;
@@ -804,7 +848,7 @@ export class ArenaScene extends Phaser.Scene {
         this.updateDrops(dt);
         if (this.tick >= 1) {
             this.tick = 0;
-            this.hp = Math.min(this.maxHp, this.hp + this.u('regen')*(this.lifePulse>0?3:1));
+            this.heal(this.u('regen')*(this.lifePulse>0?3:1));
             if (this.u('fire'))
                 this.slash(9 * this.u('fire'), 100, Math.PI * 2);
             if (this.clone > 0)
@@ -997,7 +1041,7 @@ export class ArenaScene extends Phaser.Scene {
                 }
             {const p=separateWrecks(e.x,e.y,e.r,this.mapCars);e.x=p.x;e.y=p.y;}
             if (d < e.r + 17 && !['brute','cleaver','spear','rifle','shooterBoss','commander'].includes(e.type) && e.attack <= 0) {
-                this.hurt(e.damage, e, a + Math.PI);
+                this.hurt(e.damage, e, a + Math.PI,'Zombie bite',true);
                 e.attack = .9;
             }
         }
@@ -1085,7 +1129,7 @@ export class ArenaScene extends Phaser.Scene {
                 }
             }
         }
-        if (this.xp >= this.xpNeed) {
+        if (!(this.finiteRun&&this.stats.wave===10&&this.bossDefeated) && this.xp >= this.xpNeed) {
             this.xp -= this.xpNeed;
             this.level++;
             this.xpNeed = BALANCE.xpBase + (this.level - 1) * BALANCE.xpGrowth;
@@ -1168,7 +1212,6 @@ export class ArenaScene extends Phaser.Scene {
             }
         }
         if(this.hitConfirm.time>0){const h=this.hitConfirm,w=this.warningGfx;w.lineStyle(h.crit?3:2,h.crit?0xe0c98b:0xc5d3c4,Math.min(1,h.time*5));for(const side of [-1,1]){w.lineBetween(h.x+side*5,h.y+side*5,h.x+side*10,h.y+side*10);w.lineBetween(h.x+side*5,h.y-side*5,h.x+side*10,h.y-side*10);}}
-        if(this.damageFeedback.time>0){const w=this.warningGfx,a=this.damageFeedback.angle;w.lineStyle(5,0x19232a,.9);w.beginPath();w.arc(this.x,this.y,44,a-.4,a+.4);w.strokePath();w.lineStyle(2,this.damageFeedback.value?0xd3918c:0xa5c8cf,.95);w.beginPath();w.arc(this.x,this.y,44,a-.4,a+.4);w.strokePath();}
         if(this.enemies.filter(e=>e.active&&Math.hypot(e.x-this.x,e.y-this.y)<240).length>=10){const w=this.warningGfx,a=this.escapeAngle;w.lineStyle(2,0xa7b69a,.5);for(const distance of [65,83]){const x=this.x+Math.cos(a)*distance,y=this.y+Math.sin(a)*distance;w.lineBetween(x,y,x-Math.cos(a-.55)*8,y-Math.sin(a-.55)*8);w.lineBetween(x,y,x-Math.cos(a+.55)*8,y-Math.sin(a+.55)*8);}}
         for (const b of this.bullets)
             if (b.active) {
@@ -1193,10 +1236,6 @@ export class ArenaScene extends Phaser.Scene {
         g.fillStyle(0x040b12, .6);
         g.fillEllipse(this.x, this.y + 17, 44, 18);
         this.visuals.render(this.enemies, this.hero, this.weapon, this.x, this.y, this.angle, this.elapsed, this.swing, this.dash, this.invuln, this.hero === 'tank' && this.weapon!=='hammer' && this.attacking && this.stamina > 0, this.counter, this.ammo,this.attackSequence,1+this.u('range')*.25,1+this.u('wide')*.25);
-        if (this.counter > 0 || this.waveWard || this.rewardShield>0) {
-            g.lineStyle(3, 0xc8dbff, .85);
-            g.strokeCircle(this.x, this.y, 32);
-        }
         if (this.u('fire')) {
             g.lineStyle(2, 0xffab60, .35);
             g.strokeCircle(this.x, this.y, 100);
@@ -1214,18 +1253,18 @@ export class ArenaScene extends Phaser.Scene {
         }
         if(this.overdrive>0){g.lineStyle(3,0xab9f73,.85);g.beginPath();g.arc(this.x,this.y,34,-Math.PI/2,-Math.PI/2+Math.PI*2*this.overdrive/3);g.strokePath();}
         this.visuals.showDecoy(this.hero,this.decoy);
+        if(this.earlyPower){const w=this.warningGfx,color=({ninja:0xb9a1f2,samurai:0xffb279,gunner:0xffd16c,tank:0x84e1da})[this.hero];const pose=weaponPose(this.weapon,this.x,this.y,this.angle,this.swing,this.swing>0,this.attackSequence,false,false,1+this.u('range')*.25,1+this.u('wide')*.25);w.fillStyle(color,.28+.15*Math.sin(this.elapsed*5));w.fillCircle(pose.tip.x,pose.tip.y,5);}
+
         if(this.decoy){g.fillStyle(0x7d78a4,.35);g.fillEllipse(this.decoy.x,this.decoy.y,36,44);g.lineStyle(2,0xaba3c0,.6);g.strokeCircle(this.decoy.x,this.decoy.y,25);}
         if (this.clone > 0) {
             g.fillStyle(color, .3);
             g.fillCircle(this.x - 45, this.y - 30, 17);
         }
-        if((this.save.mastery[this.hero]?.kills||0)>=500&&this.options.mode!=='daily'){g.lineStyle(2,0xc5ac7c,.85);g.strokeCircle(this.x,this.y,25);g.fillStyle(0xc5ac7c,.9);g.fillTriangle(this.x,this.y-36,this.x-5,this.y-28,this.x+5,this.y-28);this.visuals.veteran();}
-        if(this.damageFeedback.time>0){const a=this.damageFeedback.angle,alpha=this.damageFeedback.time/.65;g.lineStyle(7,0x152029,alpha);g.beginPath();g.arc(this.x,this.y,42,a-.45,a+.45);g.strokePath();g.lineStyle(3,0xb77978,alpha);g.beginPath();g.arc(this.x,this.y,42,a-.45,a+.45);g.strokePath();}
+        if((this.save.mastery[this.hero]?.kills||0)>=500&&this.options.mode!=='daily'){g.lineStyle(2,0xc5ac7c,.85);g.fillStyle(0xc5ac7c,.9);g.fillTriangle(this.x,this.y-36,this.x-5,this.y-28,this.x+5,this.y-28);this.visuals.veteran();}
         if(this.evolution.power){g.lineStyle(2,0xd99a60,.7);g.beginPath();g.arc(this.x,this.y,30,this.elapsed*4,this.elapsed*4+2);g.strokePath();}
         if(this.evolution.reach){g.lineStyle(1.5,0xa1c5ed,.7);g.strokePoints([{x:this.x-24,y:this.y+5},{x:this.x-14,y:this.y-8},{x:this.x-20,y:this.y-15}],false);}
         this.visuals.evolutionDetails(this.evolution,this.swing,this.elapsed);
-        if(this.dash>0){g.lineStyle(5,color,.5);g.lineBetween(this.x,this.y,this.x-this.dashX*65,this.y-this.dashY*65);g.lineStyle(2,0x18222a,.8);g.strokeCircle(this.x,this.y,this.hero==='tank'?50:28);}
-        if(this.boostDamage>0){g.lineStyle(2,0xc29979,.8);g.strokeCircle(this.x,this.y,27);}
+        if(this.dash>0){g.lineStyle(5,color,.5);g.lineBetween(this.x,this.y,this.x-this.dashX*65,this.y-this.dashY*65);}
         if(this.boostSpeed>0){g.lineStyle(3,0x829fa9,.8);for(let i=0;i<3;i++)g.lineBetween(this.x-20-i*8,this.y+10,this.x-28-i*8,this.y+10);}
         if (this.countdown > 0) {
             const camera = this.cameras.main;
