@@ -158,7 +158,7 @@ export class ArenaVisuals {
             else if (e.type === 'elite')
                 sprite.setTint([0xd3e4c6, 0xffa078, 0xc2efad, 0xd4b3e8, 0xff858d][e.mod]);
             shadow!.setVisible(true).setPosition(e.x, e.y + e.r * .6).setDisplaySize(e.r * 2.3, e.r);
-            if (e.type === 'spitter' && e.telegraph > 0)
+            if ((e.type === 'spitter'||e.type==='bioScreer') && e.telegraph > 0)
                 sprite.setScale(e.r * 3.4 / 128 * (1 + Math.sin(time * 20) * .07));
         }
         if (counter > 0)
