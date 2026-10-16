@@ -1,4 +1,3 @@
-import {comboHint} from './combat-feel';
 import {updateHud} from './hud-dom';
 import {combatHud,buildDetails,abilityIcons} from './combat-hud';
 import {cardEvolutionGuide,weaponEvolutionGuide} from './guide-ui';
@@ -23,6 +22,7 @@ let save = loadSave(), game: Phaser.Game | undefined, scene: ArenaScene | undefi
 if (PLAYTEST.unlimitedGold) save.gold = PLAYTEST.goldReserve;
 let selectedMode:RunMode='endless',selectedBuild:BuildId='assault';
 let touchControls: TouchControls | undefined;
+let modeSwipeStart:{x:number;y:number}|undefined;
 let guideTab='enemies',guideReturn='menu',guideHero:HeroId=save.hero,guideWeapon:WeaponId=save.weapon;
 
 const audio = new AudioManager(), overlay = document.querySelector<HTMLDivElement>('#overlay')!, hud = document.querySelector<HTMLDivElement>('#hud')!;
@@ -41,9 +41,32 @@ function shell(content: string, wide = false) { overlay.style.display = 'grid'; 
 function header(title: string, sub: string) { return `<div class="eyebrow">ZOMBIE LAST STAND <span>● OFFLINE / SOLO</span></div><h2>${title}</h2><p class="muted">${sub}</p>`; }
 function back() { return button('← Back', 'menu', 'quiet'); }
 function menu() { menuState = 'menu'; hud.innerHTML = ''; overlay.className = ''; shell(`<div class="menu-top"><span class="brand">ZLS / 07</span><span class="coin">◈ ${PLAYTEST.unlimitedGold ? '∞' : save.gold.toLocaleString()} GOLD</span></div><div class="hero-art"><div class="moon"></div><div class="city"></div><div class="menu-survivor">${artImage('hero', save.hero)}</div><div class="art-caption">THE CITY IS GONE.<br>YOUR STAND ISN’T.</div></div><div class="eyebrow">AN ENDLESS SURVIVAL ROGUELITE</div><h1>ZOMBIE<br><em>LAST STAND</em></h1><p class="intro">An endless world. An endless horde. Make every second count.</p><div class="loadout"><span class="portrait" style="--hero:#${HEROES[save.hero].color.toString(16)}">${artImage('hero', save.hero)}</span><div><b>${HEROES[save.hero].name}</b><small>${WEAPONS[save.weapon].name} · ${HEROES[save.hero].ability}</small></div>${button('Change ↗', 'characters', 'quiet')}</div><div class="menu-actions">${button('ENTER THE ARENA →', 'play', 'primary')}${button('Daily challenge', 'daily')}${button('Survivor mastery', 'mastery')}${button('Armoury & shop', 'shop')}${button('Field guide', 'guide', 'quiet')}${button('Settings', 'settings', 'quiet')}</div><div class="records"><div><b>${save.bestWave || '—'}</b><small>BEST WAVE</small></div><div><b>${format(save.bestTime)}</b><small>LONGEST STAND</small></div><div><b>${save.bestKills}</b><small>MOST KILLS</small></div><div><b>${save.shortWins}</b><small>MISSIONS WON</small></div></div><footer><span><kbd>WASD</kbd> Move <kbd>JOYSTICK</kbd> Move & aim · auto attack <kbd>SPACE</kbd> Ability</span><span>HOLD THE LINE.</span></footer>`, true); }
+const MODE_ORDER:RunMode[]=['short','endless','daily'];
+function modeIllustration(mode:RunMode){
+ const scenes={
+  short:{sky:'#242a45',light:'#9c86d8',ground:'#536b5e',building:'<path d="M318 247V142l58-42 58 42v105h-25v-55h-66v55z" fill="#83869f" stroke="#171d28" stroke-width="7" stroke-linejoin="round"/><path d="M341 151h71v22h-71zm18 49h35v47h-35z" fill="#d8dbe7" stroke="#171d28" stroke-width="5"/><path d="M286 247v-38h-30v-25h38l19 19v44m141 0v-44l19-19h37v25h-29v38" fill="#a5a9ba" stroke="#171d28" stroke-width="7" stroke-linejoin="round"/><path d="M304 211h151" stroke="#9c86d8" stroke-width="10"/>'},
+  endless:{sky:'#20243c',light:'#8790b9',ground:'#526b5c',building:'<path d="M341 247V112h24V75h63v37h24v135z" fill="#888ba4" stroke="#171d28" stroke-width="7" stroke-linejoin="round"/><path d="M366 126h61v14h-61zm0 30h61v14h-61zm0 30h61v14h-61zm0 30h61v17h-61z" fill="#d4d9e4" stroke="#171d28" stroke-width="4"/><path d="m365 75 31-43 31 43" fill="#666b85" stroke="#171d28" stroke-width="7" stroke-linejoin="round"/><path d="M311 247v-80h28v80m113 0v-80h28v80" fill="#a0a7b8" stroke="#171d28" stroke-width="6"/>'},
+  daily:{sky:'#252a45',light:'#9c86d8',ground:'#526b5c',building:'<path d="M323 247v-83l64-42 64 42v83z" fill="#9296ac" stroke="#171d28" stroke-width="7" stroke-linejoin="round"/><path d="M344 165h86m-73 21h60m-60 20h60" stroke="#d8dbe7" stroke-width="8"/><path d="M369 216h36v31h-36z" fill="#9c86d8" stroke="#171d28" stroke-width="5"/><path d="M387 122V74m0 0-31-26m31 26 31-26" fill="none" stroke="#171d28" stroke-width="7" stroke-linecap="round"/><circle cx="387" cy="73" r="9" fill="#8a9ac5" stroke="#171d28" stroke-width="5"/><path d="M351 70q-21-20 0-40m72 40q21-20 0-40" fill="none" stroke="#9c86d8" stroke-width="5" stroke-linecap="round"/>'}
+ } as const;
+ const s=scenes[mode];
+ return `<svg viewBox="0 0 760 280" role="img" aria-label="${mode==='short'?'Cartoon city street':mode==='endless'?'Cartoon iron factory':'Cartoon radio outpost'}" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="mode-sky-${mode}" x2="0" y2="1"><stop stop-color="${s.sky}"/><stop offset="1" stop-color="#34324f"/></linearGradient><radialGradient id="mode-glow-${mode}"><stop stop-color="${s.light}" stop-opacity=".26"/><stop offset="1" stop-color="${s.light}" stop-opacity="0"/></radialGradient></defs><rect width="760" height="280" fill="url(#mode-sky-${mode})"/><ellipse cx="390" cy="128" rx="250" ry="120" fill="url(#mode-glow-${mode})"/><circle cx="585" cy="61" r="22" fill="${s.light}" stroke="#171d28" stroke-width="4"/><path d="M0 221h88v-86h53v65h65V96h50v125h64v-83h43v83h94v-72h55v72h76v-95h60v95h112v59H0z" fill="#373d57" stroke="#171d28" stroke-width="6" stroke-linejoin="round"/>${s.building}<path d="M0 248h760v32H0z" fill="${s.ground}" stroke="#171d28" stroke-width="6"/><path d="M0 250h760" stroke="#9c86d8" stroke-width="5"/><g fill="#9c86d8" stroke="#171d28" stroke-width="2"><circle cx="106" cy="45" r="4"/><circle cx="198" cy="75" r="4"/><circle cx="641" cy="118" r="4"/><circle cx="540" cy="35" r="4"/><circle cx="255" cy="39" r="4"/></g></svg>`;
+}
 function runMenu(mode:RunMode='endless'){
- selectedMode=mode;menuState='run-menu';const daily=dailySetup();const kills=save.mastery[save.hero]?.kills||0;
- shell(`${header('Choose your stand','A short victory, an endless record, or today’s fixed challenge.')}<div class="run-modes">${(['short','endless','daily'] as RunMode[]).map(m=>`<button class="${m===mode?'selected':''}" data-action="mode:${m}"><b>${m==='short'?'LAST STAND':m==='daily'?'DAILY CHALLENGE':'ENDLESS'}</b><small>${m==='short'?'10 waves · defeat the final boss · about 10 minutes':m==='daily'?`${daily.date} UTC · 10 waves · fixed loadout`:'Awakening after wave 10 · full evolution after wave 20'}</small></button>`).join('')}</div>${mode==='daily'?`<div class="daily-loadout"><span class="portrait">${artImage('hero',daily.hero!)}</span><div><h3>${HEROES[daily.hero!].name} · ${WEAPONS[daily.weapon!].name}</h3><p>${BUILDS.find(b=>b.id===daily.build)!.name} build · standard ability · no permanent bonuses</p><small>TODAY’S PERSONAL BEST · ${save.daily[daily.date!]?.score||0} POINTS · ${save.daily[daily.date!]?.wins||0} WINS</small></div></div>`:`<div class="hero-identity"><b>${HERO_IDENTITIES[save.hero].icon} ${HERO_IDENTITIES[save.hero].name}</b><small>${HERO_IDENTITIES[save.hero].trigger} → ${HERO_IDENTITIES[save.hero].benefit}</small></div><div class="eyebrow">STARTING BUILD · ${HEROES[save.hero].name.toUpperCase()}</div><div class="cards build-cards">${BUILDS.map(b=>`<button class="upgrade ${b.id===selectedBuild?'selected':''}" data-action="build:${b.id}"><span class="card-icon">${b.icon}</span><h3>${b.name}</h3><p>${b.description}</p></button>`).join('')}</div><p class="muted">Technique: ${techniqueName(save.hero,save.techniques[save.hero]||'standard')} · ${kills} mastery kills. Change techniques in Survivor mastery.</p>`}<p class="muted">${mode==='endless'?'Level-ups continue throughout the run. From wave 11, maxed cards can evolve alongside regular upgrade choices.':'Defeat the wave-10 boss to win. Endless adds awakening at wave 10 and full evolution at wave 20. Victory requires defeating the wave-10 boss. Optional objectives earn extra rewards.'}</p><div class="actions">${back()}${button('Begin run →','begin','primary')}</div>`,true);
+ selectedMode=mode;menuState='run-menu';const daily=dailySetup();
+ const titles={short:'WILD STREETS',endless:'IRON FORTRESS',daily:'RADIO OUTPOST'};
+ const descriptions={short:'The city is in chaos. Survive 10 waves and defeat the General.',endless:'Push into the factory. Survive as long as you can.',daily:'A new fixed challenge every day. Beat your personal best.'};
+ const carousel=`<div class="mode-carousel" data-mode-carousel aria-label="Run mode carousel"><button class="mode-arrow" data-action="mode-step:prev" aria-label="Previous mode">◀</button><article class="mode-feature mode-${mode}"><div class="mode-titlebar"><span>${String(MODE_ORDER.indexOf(mode)+1)}. ${titles[mode]}</span></div><div class="mode-art">${modeIllustration(mode)}<span class="mode-date">${mode==='daily'?`${daily.date} UTC`:'AVAILABLE'}</span><span class="mode-zombie">${artImage('enemy','basic')}</span></div><div class="mode-description">${descriptions[mode]}</div><button class="mode-select" data-action="mode-enter">SELECT</button></article><button class="mode-arrow" data-action="mode-step:next" aria-label="Next mode">▶</button></div><div class="mode-dots">${MODE_ORDER.map(m=>`<button aria-label="Select ${m==='short'?'Last Stand':m==='daily'?'Daily Challenge':'Endless'}" aria-pressed="${m===mode}" class="${m===mode?'active':''}" data-action="mode:${m}"></button>`).join('')}</div>`;
+ shell(`${header('Choose your mission','Swipe or use the arrows to browse locations.')}${carousel}<div class="actions">${back()}</div>`,true);overlay.querySelector('.panel')?.classList.add('run-selection-panel');
+}
+function runLoadout(){
+ menuState='run-loadout';const dailyMode=selectedMode==='daily',daily=dailySetup();
+ const hero=dailyMode?daily.hero!:save.hero,weapon=dailyMode?daily.weapon!:save.weapon,build=dailyMode?daily.build!:selectedBuild,kills=save.mastery[hero]?.kills||0;
+ const modeName=selectedMode==='short'?'LAST STAND':dailyMode?'DAILY CHALLENGE':'ENDLESS';
+ const modeTitle={short:'WILD STREETS',endless:'IRON FORTRESS',daily:'RADIO OUTPOST'}[selectedMode];
+ const heroData=HEROES[hero],identity=HERO_IDENTITIES[hero],buildInfo=BUILDS.find(b=>b.id===build)!;
+ const survivor=`<section class="survivor-stage" style="--survivor-color:#${heroData.color.toString(16)}"><div class="survivor-stats"><span>⚔ ATK <b>${Math.round(WEAPONS[weapon!].damage*heroData.damage)}</b></span><span>♥ HP <b>${heroData.hp}</b></span><span>↗ SPD <b>${heroData.speed}</b></span></div><div class="gear-slot weapon-slot"><small>WEAPON</small>${artImage('weapon',weapon!)}<b>${WEAPONS[weapon!].name}</b></div><div class="survivor-figure">${artImage('hero',hero)}</div><div class="gear-slot ability-slot"><small>ABILITY</small><b>${heroData.ability}</b><span>${heroData.cooldown}s cooldown</span></div><div class="survivor-stage-name">${heroData.name} · ${identity.name}</div></section><section class="survivor-profile"><div><small>${dailyMode?'TODAY’S SURVIVOR':'YOUR SURVIVOR'}</small><h3>${heroData.name}</h3><p>${heroData.description}</p><p class="profile-passive"><b>${identity.name}</b> · ${identity.trigger} → ${identity.benefit}</p>${!dailyMode?`<small class="technique-line">${techniqueName(hero,save.techniques[hero]||'standard')} · ${kills} mastery kills</small>`:''}</div><button class="profile-change" data-action="characters">CHANGE</button></section>`;
+ const buildChoices=dailyMode?`<section class="fixed-build"><span class="build-mark">${buildInfo.icon}</span><div><small>FIXED DAILY BUILD</small><h3>${buildInfo.name}</h3><p>${buildInfo.description}</p><span>STANDARD ABILITY · NO PERMANENT BONUSES</span></div></section>`:`<section class="starting-builds"><div class="run-section-title"><span>STARTING BUILD</span><small>${heroData.name.toUpperCase()}</small></div><div class="cards build-cards">${BUILDS.map(b=>`<button class="upgrade ${b.id===selectedBuild?'selected':''}" data-action="build:${b.id}" aria-pressed="${b.id===selectedBuild}"><span class="build-mark">${b.icon}</span><h3>${b.name}</h3><p>${b.description.split('. Build')[0].replace(/\.$/,'')}</p><small>${b.id===selectedBuild?'SELECTED':'SELECT BUILD'}</small></button>`).join('')}</div></section>`;
+ shell(`${header('Your survivor','Review your fighter, then choose a starting build.') }<div class="loadout-mode"><span>${modeTitle}</span><small>${modeName}</small><button class="quiet" data-action="modes">CHANGE MODE</button></div>${survivor}${buildChoices}<div class="actions">${button('← Back','modes','quiet')}${button(`START ${modeName} →`,'begin','primary')}</div>`,true);overlay.querySelector('.panel')?.classList.add('survivor-select-panel');
 }
 function masteryMenu(){
  menuState='mastery';const hero=save.hero,kills=save.mastery[hero]?.kills||0,techniques=heroTechniques(hero),equipped=save.techniques[hero]||'standard',next=techniques.find(t=>t.kills>kills);
@@ -111,7 +134,7 @@ function waveClear(){
 
  if(scene!.evolutionDue)evolutionMenu();else finishIntermission();
 }
-function renderChoices() { const s = scene!; shell(`${header(waveChoice ? `Wave ${s.stats.wave} survived` : `Level ${s.level} · Evolve`, waveChoice ? 'Recover. Adapt. The next horde is coming.' : 'The city takes everything. Take something back.')} ${waveChoice ? `<div class="wave-recap"><span>${s.waveStats.time.toFixed(1)}s <small>CLEAR TIME</small></span><span>${s.waveStats.kills} <small>KILLS</small></span><span>◈ ${s.waveStats.gold} <small>GOLD</small></span><span>${Math.round(s.waveStats.damage)} <small>DAMAGE TAKEN</small></span></div><p class="badges">${s.waveStats.time < 45 ? '✦ QUICK CLEAR · +15% GOLD' : ''} ${s.waveStats.damage === 0 ? '◇ PERFECT CLEAR · +1 REROLL' : ''}</p>` : ''}<div class="cards upgrade-cards">${choices.map((u,i)=>visualUpgradeCard(u,i,s.hero,s.weapon,s.levels[u.id]||0,comboHint(s.hero,u.id,s.levels,s.evolution))).join('')}</div><div class="card-info-links">${choices.map((u,i)=>button('ⓘ '+u.name,'card-info:'+i,'quiet')).join('')}</div><div class="actions"><span class="muted">${button('Evolution guide','guide-cards','quiet')} · Choose one card</span>${button(`↻ Reroll (${s.rerolls} left)`, 'reroll', 'quiet')}</div>`, true); }
+function renderChoices() { const s = scene!; const title=waveChoice?header(`Wave ${s.stats.wave} survived`,'Recover. Adapt. The next horde is coming.'):`<div class="choice-heading"><b>SKILL CHOICE</b><small>LEVEL ${s.level} · PICK ONE</small></div>`; shell(`${title} ${waveChoice ? `<div class="wave-recap"><span>${s.waveStats.time.toFixed(1)}s <small>CLEAR TIME</small></span><span>${s.waveStats.kills} <small>KILLS</small></span><span>◈ ${s.waveStats.gold} <small>GOLD</small></span><span>${Math.round(s.waveStats.damage)} <small>DAMAGE TAKEN</small></span></div><p class="badges">${s.waveStats.time < 45 ? '✦ QUICK CLEAR · +15% GOLD' : ''} ${s.waveStats.damage === 0 ? '◇ PERFECT CLEAR · +1 REROLL' : ''}</p>` : ''}<div class="cards upgrade-cards">${choices.map((u,i)=>visualUpgradeCard(u,i,s.hero,s.weapon,s.levels[u.id]||0)).join('')}</div><div class="actions"><span class="muted">${button('Evolution guide','guide-cards','quiet')}</span>${button(`↻ Reroll (${s.rerolls} left)`, 'reroll', 'quiet')}</div>`, true); }
 function pick(index: number) {
     if (menuState !== 'choice' || !choices[index])
         return;
@@ -138,8 +161,14 @@ overlay.addEventListener('click', e => {
     if(a==='evolve'&&menuState==='evolution'&&evolutionOptions(scene!.hero).some(e=>e.id===b)){scene!.evolve(b as EvolutionId);finishIntermission();}
     if(a==='play')runMenu();
     if(a==='daily')runMenu('daily');
+    if(a==='mode-enter')runLoadout();
+    if(a==='modes')runMenu(selectedMode);
     if(a==='mode'&&['short','endless','daily'].includes(b))runMenu(b as RunMode);
-    if(a==='build'&&BUILDS.some(build=>build.id===b)){selectedBuild=b as BuildId;runMenu(selectedMode);}
+    if(a==='mode-step'){
+        const current=MODE_ORDER.indexOf(selectedMode),step=b==='prev'?-1:1;
+        runMenu(MODE_ORDER[(current+step+MODE_ORDER.length)%MODE_ORDER.length]);
+    }
+    if(a==='build'&&BUILDS.some(build=>build.id===b)){selectedBuild=b as BuildId;runLoadout();}
     if(a==='begin')start(selectedMode==='daily'?dailySetup():{mode:selectedMode,build:selectedBuild,technique:save.techniques[save.hero]||'standard'});
     if(a==='retry'&&scene)start({...scene.options});
     if(a==='mastery')masteryMenu();
@@ -160,8 +189,10 @@ overlay.addEventListener('click', e => {
     if(a==='guide-back'){if(guideReturn==='choice'){menuState='choice';renderChoices();}else if(guideReturn==='evolution')evolutionMenu();else if(guideReturn==='weapons')weapons();else if(guideReturn==='build')buildMenu();else menu();}
     if(a==='card-info'&&choices[Number(b)]){const u=choices[Number(b)];shell(`${header(u.name,u.description)}${visualUpgradeCard(u,Number(b),scene!.hero,scene!.weapon,scene!.levels[u.id]||0)}<p class="muted">${u.evolves?'Evolution · choose once after maxing the base card.':`Level ${(scene!.levels[u.id]||0)+1} / ${u.max}`}</p>${button('← Back to cards','cards-back','quiet')}`,true);}
     if(a==='cards-back'){menuState='choice';renderChoices();}
-    if (a === 'characters')
+    if (a === 'characters') {
+        guideReturn=menuState;
         characters();
+    }
     if (a === 'weapons')
         weapons();
     if (a === 'shop')
@@ -183,7 +214,7 @@ overlay.addEventListener('click', e => {
         if (!compatible(save.hero, save.weapon))
             save.weapon = save.weapons.find(w => compatible(save.hero, w))!;
         persist();
-        characters();
+        if(guideReturn==='run-loadout')runLoadout();else characters();
     }
     if (a === 'weapon') {
         if (!save.weapons.includes(b as WeaponId))
@@ -238,6 +269,17 @@ overlay.addEventListener('click', e => {
         menu();
     }
 });
+overlay.addEventListener('pointerdown',e=>{
+    if((e.target as Element).closest('[data-mode-carousel]'))modeSwipeStart={x:e.clientX,y:e.clientY};
+});
+overlay.addEventListener('pointerup',e=>{
+    if(!modeSwipeStart)return;
+    const dx=e.clientX-modeSwipeStart.x,dy=e.clientY-modeSwipeStart.y;modeSwipeStart=undefined;
+    if(Math.abs(dx)<48||Math.abs(dx)<Math.abs(dy)*1.2)return;
+    const current=MODE_ORDER.indexOf(selectedMode),step=dx<0?1:-1;
+    runMenu(MODE_ORDER[(current+step+MODE_ORDER.length)%MODE_ORDER.length]);
+});
+overlay.addEventListener('pointercancel',()=>{modeSwipeStart=undefined;});
 overlay.addEventListener('change',e=>{const el=e.target as HTMLSelectElement;if(el.hasAttribute('data-guide-weapon')&&Object.hasOwn(WEAPONS,el.value)){guideWeapon=el.value as WeaponId;guide();}});
 overlay.addEventListener('change', e => {
     const el = e.target as HTMLInputElement, k = el.dataset.setting as 'sound' | 'music' | 'shake' | 'aimAssist';
