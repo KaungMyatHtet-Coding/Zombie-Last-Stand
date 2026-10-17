@@ -701,6 +701,27 @@ button:disabled{box-shadow:none;filter:saturate(.55)}
 .ingame .upgrade-cards .choice-card .choice-stars span{font-size:17px}
 @media(max-width:600px){.ingame .cards.upgrade-cards:has(.choice-card){grid-template-columns:1fr;max-height:60vh;overflow-y:auto;overscroll-behavior:contain;padding:2px 5px}.ingame .upgrade-cards .choice-card{height:300px;padding:10px}.ingame .upgrade-cards .choice-card h3{min-height:32px;max-height:32px;font-size:14px}.ingame .upgrade-cards .choice-card .upgrade-demo,.ingame .upgrade-cards .choice-card .upgrade-demo.upgrade-reference-demo{height:92px}.ingame .upgrade-cards .choice-card .card-benefit{min-height:38px;max-height:38px;font-size:10px}.ingame .upgrade-cards .choice-card .choice-value{font-size:11px}.ingame .upgrade-cards .choice-card .choice-stars span{font-size:16px}}
 
+/* Evolution picks use the supplied complete hero-specific card face. */
+.choice-scroll-hint{display:none}
+.upgrade-cards .evolution-photo-card{display:flex;align-items:center;justify-content:center;overflow:hidden;padding:7px}
+.upgrade-cards .evolution-photo-card img{display:block;width:100%;height:100%;min-width:0;min-height:0;object-fit:contain;border-radius:5px;filter:drop-shadow(0 0 9px #ff526b50)}
+.upgrade-cards .evolution-photo-card:hover img{filter:drop-shadow(0 0 14px #ff718b88)}
+@media(max-width:600px){
+ .ingame .panel:has(.choice-heading){display:flex;height:calc(100dvh - 20px);max-height:calc(100dvh - 20px);flex-direction:column;overflow:hidden;padding:14px 12px 10px}
+ .ingame .choice-heading{flex:none;min-height:44px;margin:0 0 6px}
+ .ingame .choice-scroll-hint{display:block;flex:none;padding:3px 4px;color:#aab6c8;font:700 9px monospace;letter-spacing:.08em;text-align:center}
+ .ingame .cards.upgrade-cards:has(.choice-card){display:grid;flex:1 1 auto;min-height:0;max-height:none;margin:5px 0 8px;grid-template-columns:minmax(0,1fr);align-content:start;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#7893b5 #172235}
+ .ingame .upgrade-cards .choice-card{height:clamp(270px,40dvh,350px);min-height:0}
+ .ingame .upgrade-cards .evolution-photo-card{padding:5px}
+ .ingame .choice-actions{position:relative;z-index:2;flex:none;justify-content:space-between;gap:7px;margin:0;padding:9px 0 0;border-top:1px solid #46536a;background:#121a28}
+ .ingame .choice-actions>.muted{margin:0}
+ .ingame .choice-actions button{min-height:42px;padding:9px 11px;font-size:11px}
+ .ingame .choice-actions .quiet{min-width:0}
+ #overlay:has(.result-grid) .panel{max-height:calc(100dvh - 20px);padding-bottom:130px}
+ #overlay:has(.result-grid) .actions{position:fixed;z-index:20;right:8px;bottom:max(8px,env(safe-area-inset-bottom));left:8px;display:flex;justify-content:center;gap:6px;width:auto;margin:0;padding:9px;border:1px solid #526077;border-radius:12px;background:#111a29f5;box-shadow:0 -8px 28px #050811aa,0 5px 22px #0008;backdrop-filter:blur(12px)}
+ #overlay:has(.result-grid) .actions button{flex:1 1 28%;min-width:0;min-height:42px;padding:9px 7px;font-size:clamp(10px,3vw,12px)}
+}
+
 /* Robot archive cards reuse the field-guide grid with distinct, readable unit roles. */
 .robot-bestiary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:24px 0}
 .robot-card{display:flex;min-width:0;flex-direction:column;padding:16px;background:linear-gradient(145deg,#222c3a,#192430);border:1px solid #455362;border-radius:10px;box-shadow:inset 0 1px #ffffff08}

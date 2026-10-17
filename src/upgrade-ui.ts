@@ -32,6 +32,10 @@ export function visualUpgradeCard(u:Upgrade,index:number,_hero:HeroId,_weapon:We
  const maxStars=Number.isFinite(u.max)?u.max:5;
  const stars=Array.from({length:5},(_,i)=>`<span class="${i<level?'filled':''} ${i>=u.max?'locked':''}" aria-hidden="true">\u2605</span>`).join('');
  const tag=preview?'article':'button',action=preview?'':` data-action="upgrade:${index}"`;
+ if(u.evolves){
+  const art=`/assets/evolution-cards/${_hero}-${u.evolves}.webp`;
+  return `<${tag} class="upgrade choice-card evolution-card evolution-photo-card ${preview?'preview-card':''}"${action} aria-label="${preview?'Preview':'Choose'} ${u.name}: ${cardBenefit(u)}"><img src="${art}" alt="" aria-hidden="true"></${tag}>`;
+ }
  const hasDesignedArt=!u.evolves&&(FULL_CARD_IDS[_hero]||[]).includes(u.id);
  return `<${tag} class="upgrade choice-card ${hasDesignedArt?'levelup-designed-card':''} ${preview?'preview-card':''} ${u.evolves?'evolution-card':''}"${action} aria-label="${preview?'Preview':'Choose'} ${u.name}: ${cardBenefit(u)}. ${v.after}. ${level} of ${maxStars} levels">
   <span class="choice-top"><small>${category}</small>${level===0?'<b class="choice-new">NEW</b>':`<kbd>${index+1}</kbd>`}</span>
